@@ -10,6 +10,12 @@ export class CreateAssignmentDto {
   title: string;
 
   @ApiProperty({
+    example: 'chapter-uuid',
+    description: 'Chapter cua khoa hoc',
+  })
+  chapterId: string;
+
+  @ApiProperty({
     example: 'Viet chuong trinh kiem tra palindrome',
     description: 'Chi tiet de bai',
   })

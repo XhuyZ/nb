@@ -16,6 +16,7 @@ import {
 import { Repository } from 'typeorm';
 import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { AssignmentTestCase } from 'src/assignments/entities/assignment-test-case.entity';
+import { CourseMember } from 'src/courses/entities/course-member.entity';
 import {
   SubmitVersion,
   SubmitVersionStatus,
@@ -37,6 +38,8 @@ export class SubmissionsService {
     private readonly assignmentsRepository: Repository<Assignment>,
     @InjectRepository(AssignmentTestCase)
     private readonly assignmentTestCasesRepository: Repository<AssignmentTestCase>,
+    @InjectRepository(CourseMember)
+    private readonly courseMembersRepository: Repository<CourseMember>,
     @InjectRepository(SubmitVersion)
     private readonly submitVersionsRepository: Repository<SubmitVersion>,
     @InjectRepository(Plagiarism)
@@ -71,7 +74,12 @@ export class SubmissionsService {
 
     const assignment = await this.assignmentsRepository.findOne({
       where: { id: createSubmissionDto.assignmentId },
-      relations: { teacher: true },
+      relations: {
+        teacher: true,
+        chapter: {
+          course: true,
+        },
+      },
     });
     if (!assignment) {
       throw new NotFoundException('Assignment not found');
@@ -79,6 +87,21 @@ export class SubmissionsService {
 
     if (!createSubmissionDto.code && !file) {
       throw new BadRequestException('Code or file is required');
+    }
+
+    const courseId = assignment.chapter?.course?.id;
+    if (!courseId) {
+      throw new ForbiddenException('Assignment has no course chapter');
+    }
+    const member = await this.courseMembersRepository.findOne({
+      where: {
+        course: { id: courseId },
+        student: { id: studentId },
+        active: true,
+      },
+    });
+    if (!member) {
+      throw new ForbiddenException('Join course before submitting assignment');
     }
 
     if (assignment.status !== 'open') {
@@ -98,7 +121,11 @@ export class SubmissionsService {
       },
       relations: {
         student: true,
-        assignment: true,
+        assignment: {
+          chapter: {
+            course: true,
+          },
+        },
         versions: true,
         testResults: {
           testCase: true,
@@ -173,7 +200,11 @@ export class SubmissionsService {
     return this.submissionsRepository.find({
       relations: {
         student: true,
-        assignment: true,
+        assignment: {
+          chapter: {
+            course: true,
+          },
+        },
         versions: true,
         testResults: {
           testCase: true,
@@ -229,7 +260,11 @@ export class SubmissionsService {
       where: { assignment: { id: assignmentId } },
       relations: {
         student: true,
-        assignment: true,
+        assignment: {
+          chapter: {
+            course: true,
+          },
+        },
       },
       order: { created_at: 'DESC' },
     });
@@ -278,6 +313,35 @@ export class SubmissionsService {
       .getMany();
   }
 
+  async findPlagiarismStatistics(
+    submissionId: string,
+    requesterId: string,
+    role: UserRole,
+  ) {
+    const matches = await this.findPlagiarism(submissionId, requesterId, role);
+    const submission = await this.getSubmissionEntity(submissionId);
+
+    return {
+      submissionId,
+      student: submission.student
+        ? {
+            id: submission.student.id,
+            username: submission.student.username,
+          }
+        : null,
+      highestSimilarity: submission.highestSimilarity ?? 0,
+      highRiskCount: matches.filter((item) => item.highRisk).length,
+      matches: matches.map((item) => ({
+        plagiarismId: item.id,
+        similarity: item.similarity,
+        highRisk: item.highRisk,
+        submitVersionAId: item.submitVersionA?.id,
+        submitVersionBId: item.submitVersionB?.id,
+        evidence: item.evidence ?? { commonTokens: [], commonLines: [] },
+      })),
+    };
+  }
+
   async update(id: string, updateSubmissionDto: UpdateSubmissionDto) {
     const submission = await this.getSubmissionEntity(id);
     Object.assign(submission, updateSubmissionDto);
@@ -298,6 +362,9 @@ export class SubmissionsService {
         student: true,
         assignment: {
           teacher: true,
+          chapter: {
+            course: true,
+          },
         },
         versions: true,
         testResults: {
@@ -325,7 +392,33 @@ export class SubmissionsService {
             role: submission.student.role,
           }
         : null,
-      assignment: submission.assignment,
+      assignment: submission.assignment
+        ? {
+            id: submission.assignment.id,
+            title: submission.assignment.title,
+            description: submission.assignment.description,
+            document: submission.assignment.document,
+            deadline: submission.assignment.deadline,
+            maxScore: submission.assignment.maxScore,
+            evaluationCriteria: submission.assignment.evaluationCriteria,
+            allowLateSubmission: submission.assignment.allowLateSubmission,
+            status: submission.assignment.status,
+            chapter: submission.assignment.chapter
+              ? {
+                  id: submission.assignment.chapter.id,
+                  title: submission.assignment.chapter.title,
+                  course: submission.assignment.chapter.course
+                    ? {
+                        id: submission.assignment.chapter.course.id,
+                        name: submission.assignment.chapter.course.name,
+                      }
+                    : null,
+                }
+              : null,
+            created_at: submission.assignment.created_at,
+            updated_at: submission.assignment.updated_at,
+          }
+        : null,
       code: submission.code,
       file: submission.file,
       language: submission.language,
@@ -464,6 +557,10 @@ export class SubmissionsService {
           submitVersionB: other,
           similarity,
           highRisk: similarity >= this.highRiskThreshold,
+          evidence: this.extractPlagiarismEvidence(
+            version.codeSnapshot ?? '',
+            other.codeSnapshot ?? '',
+          ),
         }),
       );
       if (similarity > highestSimilarity) {
@@ -565,6 +662,30 @@ process.stdin.on('end', async () => {
       .replace(/[^a-z0-9_]+/g, ' ')
       .split(' ')
       .filter((token) => token.length > 1);
+  }
+
+  private extractPlagiarismEvidence(codeA: string, codeB: string) {
+    const tokensA = this.normalizeCode(codeA);
+    const tokensB = this.normalizeCode(codeB);
+    const commonTokenSet = new Set(tokensA.filter((token) => tokensB.includes(token)));
+    const commonTokens = [...commonTokenSet].slice(0, 15);
+
+    const linesA = codeA
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 5);
+    const linesBSet = new Set(
+      codeB
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 5),
+    );
+    const commonLines = linesA.filter((line) => linesBSet.has(line)).slice(0, 5);
+
+    return {
+      commonTokens,
+      commonLines,
+    };
   }
 
   private normalizeOutput(value: string | undefined) {

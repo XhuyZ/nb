@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Submission } from './entities/submission.entity';
 import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { AssignmentTestCase } from 'src/assignments/entities/assignment-test-case.entity';
+import { CourseMember } from 'src/courses/entities/course-member.entity';
 import { SubmitVersion } from 'src/submit-versions/entities/submit-version.entity';
 import { Plagiarism } from 'src/plagiarisms/entities/plagiarism.entity';
 import { User } from 'src/users/entities/user.entity';
@@ -16,6 +17,7 @@ import { SubmissionTestResult } from './entities/submission-test-result.entity';
       Submission,
       Assignment,
       AssignmentTestCase,
+      CourseMember,
       SubmitVersion,
       Plagiarism,
       User,

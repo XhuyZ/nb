@@ -6,10 +6,19 @@ import { Assignment } from './entities/assignment.entity';
 import { User } from 'src/users/entities/user.entity';
 import { AssignmentDocument } from './entities/assignment-document.entity';
 import { AssignmentTestCase } from './entities/assignment-test-case.entity';
+import { Chapter } from 'src/courses/entities/chapter.entity';
+import { Course } from 'src/courses/entities/course.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Assignment, User, AssignmentDocument, AssignmentTestCase]),
+    TypeOrmModule.forFeature([
+      Assignment,
+      User,
+      AssignmentDocument,
+      AssignmentTestCase,
+      Chapter,
+      Course,
+    ]),
   ],
   controllers: [AssignmentsController],
   providers: [AssignmentsService],

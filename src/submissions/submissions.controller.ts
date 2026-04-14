@@ -162,6 +162,19 @@ export class SubmissionsController {
     );
   }
 
+  @Get(':id/plagiarism/stats')
+  @ApiOperation({ summary: 'Thong ke va bang chung dao code' })
+  findPlagiarismStatistics(
+    @Req() req: { user: RequestUser },
+    @Param('id') id: string,
+  ) {
+    return this.submissionsService.findPlagiarismStatistics(
+      id,
+      req.user.sub,
+      req.user.role,
+    );
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lay chi tiet bai nop' })
   findOne(@Param('id') id: string) {

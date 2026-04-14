@@ -6,11 +6,13 @@ import {
 	CreateDateColumn,
 	UpdateDateColumn,
 	OneToMany,
+	OneToOne,
 } from 'typeorm';
 import { User } from 'src/users/entities/user.entity';
 import { Submission } from 'src/submissions/entities/submission.entity';
 import { AssignmentDocument } from './assignment-document.entity';
 import { AssignmentTestCase } from './assignment-test-case.entity';
+import { Chapter } from 'src/courses/entities/chapter.entity';
 
 export enum AssignmentStatus {
 	DRAFT = 'draft',
@@ -25,6 +27,9 @@ export class Assignment {
 
 	@ManyToOne(() => User, (user) => user.assignments)
 	teacher: User;
+
+	@OneToOne(() => Chapter, (chapter) => chapter.assignment, { nullable: true })
+	chapter?: Chapter;
 
 	@Column()
 	title: string;

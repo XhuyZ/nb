@@ -1,4 +1,6 @@
 import { Assignment } from 'src/assignments/entities/assignment.entity';
+import { CourseMember } from 'src/courses/entities/course-member.entity';
+import { Course } from 'src/courses/entities/course.entity';
 import { Submission } from 'src/submissions/entities/submission.entity';
 import {
   Entity,
@@ -39,8 +41,14 @@ export class User {
   @OneToMany(() => Assignment, (assignment) => assignment.teacher)
   assignments: Assignment[];
 
+  @OneToMany(() => Course, (course) => course.teacher)
+  teachingCourses: Course[];
+
   @OneToMany(() => Submission, (submission) => submission.student)
   submissions: Submission[];
+
+  @OneToMany(() => CourseMember, (member) => member.student)
+  courseMemberships: CourseMember[];
 
   @CreateDateColumn()
   created_at: Date;

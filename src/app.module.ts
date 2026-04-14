@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module';
 import { SeedModule } from './seed/seed.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { CoursesModule } from './courses/courses.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     PlagiarismsModule,
     AuthModule,
     SeedModule,
+    CoursesModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtAuthGuard, RolesGuard],

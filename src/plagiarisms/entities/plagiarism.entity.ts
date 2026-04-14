@@ -25,6 +25,12 @@ export class Plagiarism {
   @Column({ default: false })
   highRisk: boolean;
 
+  @Column({ type: 'jsonb', nullable: true })
+  evidence?: {
+    commonTokens: string[];
+    commonLines: string[];
+  };
+
   @CreateDateColumn()
   created_at: Date;
 

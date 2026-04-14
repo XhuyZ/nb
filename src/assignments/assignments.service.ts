@@ -11,6 +11,7 @@ import { Not, IsNull, Repository } from 'typeorm';
 import { User, UserRole } from 'src/users/entities/user.entity';
 import { AssignmentDocument } from './entities/assignment-document.entity';
 import { AssignmentTestCase } from './entities/assignment-test-case.entity';
+import { Chapter } from 'src/courses/entities/chapter.entity';
 
 @Injectable()
 export class AssignmentsService {
@@ -23,6 +24,8 @@ export class AssignmentsService {
     private readonly assignmentDocumentsRepository: Repository<AssignmentDocument>,
     @InjectRepository(AssignmentTestCase)
     private readonly assignmentTestCasesRepository: Repository<AssignmentTestCase>,
+    @InjectRepository(Chapter)
+    private readonly chaptersRepository: Repository<Chapter>,
   ) {}
 
   async createByTeacher(
@@ -38,8 +41,30 @@ export class AssignmentsService {
       throw new ForbiddenException('Teacher account not found');
     }
 
+    const chapter = await this.chaptersRepository.findOne({
+      where: {
+        id: createAssignmentDto.chapterId,
+        course: {
+          teacher: { id: teacherId },
+        },
+      },
+      relations: {
+        course: {
+          teacher: true,
+        },
+        assignment: true,
+      },
+    });
+    if (!chapter) {
+      throw new ForbiddenException('Chapter not found or not in your course');
+    }
+    if (chapter.assignment) {
+      throw new ForbiddenException('Chapter already has assignment');
+    }
+
     const assignment = this.assignmentsRepository.create({
       teacher,
+      chapter,
       title: createAssignmentDto.title,
       description: createAssignmentDto.description,
       deadline: createAssignmentDto.deadline
@@ -53,6 +78,8 @@ export class AssignmentsService {
     });
 
     const saved = await this.assignmentsRepository.save(assignment);
+    chapter.assignment = saved;
+    await this.chaptersRepository.save(chapter);
     await this.saveAssignmentTestCases(saved.id, createAssignmentDto.testCases ?? []);
     return this.toAssignmentResponse({
       ...saved,
@@ -64,6 +91,9 @@ export class AssignmentsService {
     return this.assignmentsRepository.find({
       relations: {
         teacher: true,
+        chapter: {
+          course: true,
+        },
         testCases: true,
       },
       order: {
@@ -77,6 +107,9 @@ export class AssignmentsService {
       where: { teacher: { id: teacherId } },
       relations: {
         teacher: true,
+        chapter: {
+          course: true,
+        },
         testCases: true,
       },
       order: {
@@ -102,6 +135,9 @@ export class AssignmentsService {
       },
       relations: {
         teacher: true,
+        chapter: {
+          course: true,
+        },
         testCases: true,
       },
       order: {
@@ -227,6 +263,9 @@ export class AssignmentsService {
       where: { id },
       relations: {
         teacher: true,
+        chapter: {
+          course: true,
+        },
         testCases: true,
       },
     });
@@ -264,6 +303,19 @@ export class AssignmentsService {
         weight: testCase.weight,
         orderIndex: testCase.orderIndex,
       })),
+      chapter: assignment.chapter
+        ? {
+            id: assignment.chapter.id,
+            title: assignment.chapter.title,
+            orderIndex: assignment.chapter.orderIndex,
+            course: assignment.chapter.course
+              ? {
+                  id: assignment.chapter.course.id,
+                  name: assignment.chapter.course.name,
+                }
+              : null,
+          }
+        : null,
       created_at: assignment.created_at,
       updated_at: assignment.updated_at,
     };

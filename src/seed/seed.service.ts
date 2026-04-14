@@ -6,6 +6,9 @@ import {
 } from 'src/assignments/entities/assignment.entity';
 import { AssignmentDocument } from 'src/assignments/entities/assignment-document.entity';
 import { AssignmentTestCase } from 'src/assignments/entities/assignment-test-case.entity';
+import { Chapter } from 'src/courses/entities/chapter.entity';
+import { CourseMember } from 'src/courses/entities/course-member.entity';
+import { Course } from 'src/courses/entities/course.entity';
 import { Plagiarism } from 'src/plagiarisms/entities/plagiarism.entity';
 import {
   ProcessingStatus,
@@ -31,6 +34,12 @@ export class SeedService implements OnApplicationBootstrap {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Assignment)
     private readonly assignmentRepository: Repository<Assignment>,
+    @InjectRepository(Course)
+    private readonly courseRepository: Repository<Course>,
+    @InjectRepository(Chapter)
+    private readonly chapterRepository: Repository<Chapter>,
+    @InjectRepository(CourseMember)
+    private readonly courseMemberRepository: Repository<CourseMember>,
     @InjectRepository(AssignmentDocument)
     private readonly assignmentDocumentRepository: Repository<AssignmentDocument>,
     @InjectRepository(AssignmentTestCase)
@@ -51,7 +60,7 @@ export class SeedService implements OnApplicationBootstrap {
 
   private async seed() {
     await this.dataSource.query(
-      'TRUNCATE TABLE "plagiarisms", "submission_test_results", "submit_versions", "submissions", "assignment_test_cases", "assignment_documents", "assignments", "users" RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE "plagiarisms", "submission_test_results", "submit_versions", "submissions", "assignment_test_cases", "assignment_documents", "chapters", "course_members", "courses", "assignments", "users" RESTART IDENTITY CASCADE',
     );
 
     const admin = this.userRepository.create({
@@ -90,8 +99,50 @@ export class SeedService implements OnApplicationBootstrap {
     const closedDeadline = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
     const openDeadline = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
+    const course = await this.courseRepository.save(
+      this.courseRepository.create({
+        teacher: teacher1,
+        name: 'Course 1 - Algorithm Foundations',
+        description: 'Khoa hoc gom 3 chuong, moi chuong 1 assignment',
+        isPublished: true,
+      }),
+    );
+
+    const chapter1 = await this.chapterRepository.save(
+      this.chapterRepository.create({
+        course,
+        title: 'Chuong 1 - Loops and Arrays',
+        orderIndex: 1,
+      }),
+    );
+    const chapter2 = await this.chapterRepository.save(
+      this.chapterRepository.create({
+        course,
+        title: 'Chuong 2 - Recursion',
+        orderIndex: 2,
+      }),
+    );
+    const chapter3 = await this.chapterRepository.save(
+      this.chapterRepository.create({
+        course,
+        title: 'Chuong 3 - Dynamic Programming',
+        orderIndex: 3,
+      }),
+    );
+
+    await this.courseMemberRepository.save(
+      students.map((student) =>
+        this.courseMemberRepository.create({
+          course,
+          student,
+          active: true,
+        }),
+      ),
+    );
+
     const assignmentClosed = this.assignmentRepository.create({
       teacher: teacher1,
+      chapter: chapter1,
       title: 'Assignment 1 - Loops and Arrays',
       description: 'Bai tap da het han, 5 sinh vien da nop bai',
       deadline: closedDeadline,
@@ -105,6 +156,7 @@ export class SeedService implements OnApplicationBootstrap {
 
     const assignmentOpen = this.assignmentRepository.create({
       teacher: teacher1,
+      chapter: chapter2,
       title: 'Assignment 2 - Recursion',
       description: 'Bai tap chua co submission',
       deadline: openDeadline,
@@ -116,6 +168,7 @@ export class SeedService implements OnApplicationBootstrap {
 
     const assignmentLateAllowed = this.assignmentRepository.create({
       teacher: teacher1,
+      chapter: chapter3,
       title: 'Assignment 3 - Dynamic Programming',
       description: 'Demo case nop tre han va nop nhieu lan',
       deadline: new Date(now.getTime() - 24 * 60 * 60 * 1000),
@@ -130,6 +183,11 @@ export class SeedService implements OnApplicationBootstrap {
       assignmentOpen,
       assignmentLateAllowed,
     ]);
+
+    chapter1.assignment = assignmentClosed;
+    chapter2.assignment = assignmentOpen;
+    chapter3.assignment = assignmentLateAllowed;
+    await this.chapterRepository.save([chapter1, chapter2, chapter3]);
 
     await this.assignmentTestCaseRepository.save([
       this.assignmentTestCaseRepository.create({
@@ -314,18 +372,30 @@ export class SeedService implements OnApplicationBootstrap {
         submitVersionB: savedVersions[1],
         similarity: 0.82,
         highRisk: true,
+        evidence: {
+          commonTokens: ['function', 'solve', 'return'],
+          commonLines: ['function solve() { return 1; }'],
+        },
       }),
       this.plagiarismRepository.create({
         submitVersionA: lateVersion2,
         submitVersionB: lateVersion3,
         similarity: 0.91,
         highRisk: true,
+        evidence: {
+          commonTokens: ['solveDp', 'return', 'n', 'if'],
+          commonLines: ['return solveDp(n-1)+solveDp(n-2);'],
+        },
       }),
       this.plagiarismRepository.create({
         submitVersionA: lateVersion1,
         submitVersionB: lateVersion3,
         similarity: 0.65,
         highRisk: false,
+        evidence: {
+          commonTokens: ['solveDp', 'return'],
+          commonLines: [],
+        },
       }),
     ]);
 

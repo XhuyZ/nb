@@ -52,9 +52,10 @@ export class AssignmentsController {
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['title', 'description'],
+      required: ['title', 'description', 'chapterId'],
       properties: {
         title: { type: 'string' },
+        chapterId: { type: 'string' },
         description: { type: 'string' },
         deadline: { type: 'string', format: 'date-time' },
         status: { type: 'string', enum: ['draft', 'open', 'closed'] },
