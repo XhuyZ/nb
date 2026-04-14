@@ -29,6 +29,8 @@ export class Plagiarism {
   evidence?: {
     commonTokens: string[];
     commonLines: string[];
+    astNodesA?: string[];
+    astNodesB?: string[];
   };
 
   @CreateDateColumn()

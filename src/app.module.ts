@@ -14,6 +14,9 @@ import { SeedModule } from './seed/seed.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { CoursesModule } from './courses/courses.module';
+import { StatisticsReportingModule } from './statistics-reporting/statistics-reporting.module';
+import { ReviewVerdictModule } from './review-verdict/review-verdict.module';
+import { EvidenceChainModule } from './evidence-chain/evidence-chain.module';
 
 @Module({
   imports: [
@@ -27,6 +30,9 @@ import { CoursesModule } from './courses/courses.module';
     AuthModule,
     SeedModule,
     CoursesModule,
+    StatisticsReportingModule,
+    ReviewVerdictModule,
+    EvidenceChainModule,
   ],
   controllers: [AppController],
   providers: [AppService, JwtAuthGuard, RolesGuard],

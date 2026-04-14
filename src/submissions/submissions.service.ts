@@ -14,6 +14,8 @@ import {
   SubmissionStatus,
 } from './entities/submission.entity';
 import { Repository } from 'typeorm';
+import { parse } from '@babel/parser';
+import traverse from '@babel/traverse';
 import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { AssignmentTestCase } from 'src/assignments/entities/assignment-test-case.entity';
 import { CourseMember } from 'src/courses/entities/course-member.entity';
@@ -634,8 +636,10 @@ process.stdin.on('end', async () => {
   }
 
   private computeSimilarity(a: string, b: string): number {
-    const tokensA = new Set(this.normalizeCode(a));
-    const tokensB = new Set(this.normalizeCode(b));
+    const astA = this.extractAstFeatures(a);
+    const astB = this.extractAstFeatures(b);
+    const tokensA = new Set([...this.normalizeCode(a), ...astA.identifiers, ...astA.nodeTypes]);
+    const tokensB = new Set([...this.normalizeCode(b), ...astB.identifiers, ...astB.nodeTypes]);
 
     if (tokensA.size === 0 || tokensB.size === 0) {
       return 0;
@@ -665,27 +669,61 @@ process.stdin.on('end', async () => {
   }
 
   private extractPlagiarismEvidence(codeA: string, codeB: string) {
-    const tokensA = this.normalizeCode(codeA);
-    const tokensB = this.normalizeCode(codeB);
+    const astA = this.extractAstFeatures(codeA);
+    const astB = this.extractAstFeatures(codeB);
+    const tokensA = [...this.normalizeCode(codeA), ...astA.identifiers];
+    const tokensB = [...this.normalizeCode(codeB), ...astB.identifiers];
     const commonTokenSet = new Set(tokensA.filter((token) => tokensB.includes(token)));
     const commonTokens = [...commonTokenSet].slice(0, 15);
 
-    const linesA = codeA
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 5);
-    const linesBSet = new Set(
-      codeB
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 5),
-    );
-    const commonLines = linesA.filter((line) => linesBSet.has(line)).slice(0, 5);
+    const lineSetB = new Set(astB.lines);
+    const commonLines = astA.lines.filter((line) => lineSetB.has(line)).slice(0, 5);
 
     return {
       commonTokens,
       commonLines,
+      astNodesA: astA.nodeTypes.slice(0, 15),
+      astNodesB: astB.nodeTypes.slice(0, 15),
     };
+  }
+
+  private extractAstFeatures(code: string) {
+    try {
+      const ast = parse(code, {
+        sourceType: 'unambiguous',
+        plugins: ['typescript'],
+        errorRecovery: true,
+      });
+      const identifiers = new Set<string>();
+      const nodeTypes = new Set<string>();
+      const lines: string[] = [];
+      const sourceLines = code.split('\n');
+
+      traverse(ast, {
+        enter(path) {
+          nodeTypes.add(path.node.type);
+          if ('name' in path.node && typeof path.node.name === 'string') {
+            identifiers.add(path.node.name);
+          }
+          const startLine = path.node.loc?.start.line;
+          if (startLine && sourceLines[startLine - 1]) {
+            lines.push(sourceLines[startLine - 1].trim());
+          }
+        },
+      });
+
+      return {
+        identifiers: [...identifiers],
+        nodeTypes: [...nodeTypes],
+        lines: lines.filter((line) => line.length > 5),
+      };
+    } catch {
+      return {
+        identifiers: [],
+        nodeTypes: [],
+        lines: [],
+      };
+    }
   }
 
   private normalizeOutput(value: string | undefined) {
