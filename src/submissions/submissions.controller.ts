@@ -60,7 +60,7 @@ export class SubmissionsController {
       },
     },
   })
-  @ResponseMessage('Nop bai thanh cong')
+  @ResponseMessage('Submission created successfully')
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
@@ -117,7 +117,7 @@ export class SubmissionsController {
   @Get()
   @Roles(UserRole.STUDENT)
   @ApiOperation({ summary: 'Student xem bai da nop' })
-  @ResponseMessage('Lay bai nop thanh cong')
+  @ResponseMessage('Submissions retrieved successfully')
   findMine(@Req() req: { user: RequestUser }) {
     return this.submissionsService.findByStudent(req.user.sub);
   }

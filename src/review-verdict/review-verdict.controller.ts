@@ -39,7 +39,7 @@ export class ReviewVerdictController {
   @Patch(':submissionId/verdict')
   @Roles(UserRole.TEACHER, UserRole.ADMIN)
   @ApiOperation({ summary: 'Dat ket luan cuoi cung cho bai nop' })
-  @ResponseMessage('Cap nhat ket luan thanh cong')
+  @ResponseMessage('Review verdict updated successfully')
   setVerdict(
     @Param('submissionId') submissionId: string,
     @Req() req: { user: { sub: string; role: UserRole } },

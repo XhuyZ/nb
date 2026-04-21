@@ -13,7 +13,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Đăng nhập và lấy JWT chứa role',
   })
-  @ResponseMessage('Dang nhap thanh cong')
+  @ResponseMessage('Login successful')
   login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }

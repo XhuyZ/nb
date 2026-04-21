@@ -20,7 +20,7 @@ export class UsersController {
 
   @Post()
   @ApiOperation({ summary: 'Admin tao user' })
-  @ResponseMessage('Tao user thanh cong')
+  @ResponseMessage('User created successfully')
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);
   }
@@ -45,7 +45,7 @@ export class UsersController {
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Admin active/inactive user' })
-  @ResponseMessage('Cap nhat trang thai user thanh cong')
+  @ResponseMessage('User status updated successfully')
   updateStatus(
     @Param('id') id: string,
     @Body() updateUserStatusDto: UpdateUserStatusDto,

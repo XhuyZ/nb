@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { User, UserRole } from 'src/users/entities/user.entity';
 import { Repository } from 'typeorm';
 import { CreateCourseDto } from './dto/create-course.dto';
@@ -21,6 +22,8 @@ export class CoursesService {
     private readonly courseMembersRepository: Repository<CourseMember>,
     @InjectRepository(Chapter)
     private readonly chaptersRepository: Repository<Chapter>,
+    @InjectRepository(Assignment)
+    private readonly assignmentsRepository: Repository<Assignment>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
   ) {}
@@ -120,6 +123,69 @@ export class CoursesService {
       },
     });
     return members.map((member) => this.mapCourse(member.course));
+  }
+
+  async listAssignmentsForStudent(studentId: string, courseId?: string) {
+    const query = this.assignmentsRepository
+      .createQueryBuilder('assignment')
+      .leftJoinAndSelect('assignment.teacher', 'teacher')
+      .leftJoinAndSelect('assignment.chapter', 'chapter')
+      .leftJoinAndSelect('chapter.course', 'course')
+      .leftJoinAndSelect('assignment.testCases', 'testCase')
+      .innerJoin(
+        'course_members',
+        'member',
+        'member."courseId" = course.id AND member."studentId" = :studentId AND member.active = true',
+        { studentId },
+      )
+      .orderBy('assignment.created_at', 'DESC')
+      .addOrderBy('testCase.orderIndex', 'ASC');
+
+    if (courseId) {
+      query.andWhere('course.id = :courseId', { courseId });
+    }
+
+    const assignments = await query.getMany();
+    return assignments.map((assignment) => ({
+      id: assignment.id,
+      title: assignment.title,
+      description: assignment.description,
+      document: assignment.document,
+      deadline: assignment.deadline,
+      status: assignment.status,
+      maxScore: assignment.maxScore,
+      evaluationCriteria: assignment.evaluationCriteria,
+      allowLateSubmission: assignment.allowLateSubmission,
+      teacher: assignment.teacher
+        ? {
+            id: assignment.teacher.id,
+            username: assignment.teacher.username,
+          }
+        : null,
+      chapter: assignment.chapter
+        ? {
+            id: assignment.chapter.id,
+            title: assignment.chapter.title,
+            orderIndex: assignment.chapter.orderIndex,
+            course: assignment.chapter.course
+              ? {
+                  id: assignment.chapter.course.id,
+                  name: assignment.chapter.course.name,
+                }
+              : null,
+          }
+        : null,
+      testCases: (assignment.testCases ?? []).map((testCase) => ({
+        id: testCase.id,
+        input: testCase.input,
+        expectedOutput: testCase.isSample ? testCase.expectedOutput : undefined,
+        isSample: testCase.isSample,
+        weight: testCase.weight,
+        orderIndex: testCase.orderIndex,
+      })),
+      created_at: assignment.created_at,
+      updated_at: assignment.updated_at,
+    }));
   }
 
   async listTeachingCourses(teacherId: string) {

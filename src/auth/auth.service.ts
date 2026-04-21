@@ -14,11 +14,11 @@ export class AuthService {
     const user = await this.usersService.findByUsername(loginDto.username);
 
     if (!user || user.password !== loginDto.password) {
-      throw new UnauthorizedException('Sai username hoặc password');
+      throw new UnauthorizedException('Invalid username or password');
     }
 
     if (!user.status) {
-      throw new UnauthorizedException('Tài khoản đã bị khóa');
+      throw new UnauthorizedException('Account is inactive');
     }
 
     const payload = {

@@ -71,7 +71,7 @@ export class AssignmentsController {
       },
     },
   })
-  @ResponseMessage('Tao assignment thanh cong')
+  @ResponseMessage('Assignment created successfully')
   @UseInterceptors(
     FileInterceptor('document', {
       storage: diskStorage({
@@ -124,14 +124,14 @@ export class AssignmentsController {
   @Get()
   @Roles(UserRole.TEACHER)
   @ApiOperation({ summary: 'Teacher lay assignment da tao' })
-  @ResponseMessage('Lay danh sach assignment thanh cong')
+  @ResponseMessage('Assignments retrieved successfully')
   findMine(@Req() req: { user: RequestUser }) {
     return this.assignmentsService.findByTeacher(req.user.sub);
   }
 
   @Get('documents')
   @ApiOperation({ summary: 'Lay tat ca tai lieu he thong' })
-  @ResponseMessage('Lay danh sach tai lieu thanh cong')
+  @ResponseMessage('Documents retrieved successfully')
   findDocuments() {
     return this.assignmentsService.findAllDocuments();
   }
@@ -149,7 +149,7 @@ export class AssignmentsController {
       },
     },
   })
-  @ResponseMessage('Them tai lieu thanh cong')
+  @ResponseMessage('Document uploaded successfully')
   @UseInterceptors(
     FileInterceptor('document', {
       storage: diskStorage({
@@ -246,7 +246,7 @@ export class AssignmentsController {
   @Patch(':id/status')
   @Roles(UserRole.TEACHER)
   @ApiOperation({ summary: 'Teacher cap nhat vong doi assignment' })
-  @ResponseMessage('Cap nhat trang thai assignment thanh cong')
+  @ResponseMessage('Assignment status updated successfully')
   updateStatus(
     @Param('id') id: string,
     @Req() req: { user: RequestUser },

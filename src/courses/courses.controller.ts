@@ -28,7 +28,7 @@ export class CoursesController {
   @Post()
   @Roles(UserRole.TEACHER)
   @ApiOperation({ summary: 'Teacher tao khoa hoc' })
-  @ResponseMessage('Tao khoa hoc thanh cong')
+  @ResponseMessage('Course created successfully')
   createCourse(
     @Req() req: { user: { sub: string } },
     @Body() dto: CreateCourseDto,
@@ -55,6 +55,23 @@ export class CoursesController {
     return this.coursesService.listEnrolledCourses(req.user.sub);
   }
 
+  @Get('my/assignments')
+  @Roles(UserRole.STUDENT)
+  @ApiOperation({ summary: 'Student view assignments in enrolled courses' })
+  @ApiQuery({
+    name: 'courseId',
+    required: false,
+    type: String,
+    description: 'Optional course id to filter assignments',
+  })
+  @ResponseMessage('Enrolled course assignments retrieved successfully')
+  listMyAssignments(
+    @Req() req: { user: { sub: string } },
+    @Query('courseId') courseId?: string,
+  ) {
+    return this.coursesService.listAssignmentsForStudent(req.user.sub, courseId);
+  }
+
   @Get('my/teaching')
   @Roles(UserRole.TEACHER)
   @ApiOperation({ summary: 'Teacher xem khoa hoc dang day' })
@@ -65,7 +82,7 @@ export class CoursesController {
   @Post(':id/enroll')
   @Roles(UserRole.STUDENT)
   @ApiOperation({ summary: 'Student tham gia khoa hoc' })
-  @ResponseMessage('Tham gia khoa hoc thanh cong')
+  @ResponseMessage('Joined course successfully')
   enrollCourse(@Param('id') id: string, @Req() req: { user: { sub: string } }) {
     return this.coursesService.enrollCourse(id, req.user.sub);
   }
@@ -73,7 +90,7 @@ export class CoursesController {
   @Post(':id/chapters')
   @Roles(UserRole.TEACHER)
   @ApiOperation({ summary: 'Teacher tao chuong trong khoa hoc' })
-  @ResponseMessage('Tao chuong thanh cong')
+  @ResponseMessage('Chapter created successfully')
   createChapter(
     @Param('id') courseId: string,
     @Req() req: { user: { sub: string } },

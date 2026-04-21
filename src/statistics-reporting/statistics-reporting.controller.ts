@@ -32,7 +32,7 @@ export class StatisticsReportingController {
   @Post('export-pdf')
   @Roles(UserRole.ADMIN, UserRole.TEACHER)
   @ApiOperation({ summary: 'Sinh va xuat bao cao PDF' })
-  @ResponseMessage('Xuat bao cao PDF thanh cong')
+  @ResponseMessage('PDF report exported successfully')
   exportPdf(
     @Req() req: { user: { sub: string } },
     @Body() body: { type?: ReportType; courseId?: string },
