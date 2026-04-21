@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { Course } from 'src/courses/entities/course.entity';
 import { Plagiarism } from 'src/plagiarisms/entities/plagiarism.entity';
+import { SubmitVersion } from 'src/submit-versions/entities/submit-version.entity';
 import { Submission } from 'src/submissions/entities/submission.entity';
 import { Repository } from 'typeorm';
 import PDFDocument from 'pdfkit';
@@ -16,6 +17,8 @@ export class StatisticsReportingService {
   constructor(
     @InjectRepository(Submission)
     private readonly submissionsRepository: Repository<Submission>,
+    @InjectRepository(SubmitVersion)
+    private readonly submitVersionsRepository: Repository<SubmitVersion>,
     @InjectRepository(Plagiarism)
     private readonly plagiarismsRepository: Repository<Plagiarism>,
     @InjectRepository(Assignment)
@@ -89,6 +92,90 @@ export class StatisticsReportingService {
         date,
         submissionCount: count,
       })),
+    };
+  }
+
+  async getSubmissionTrends(courseId: string, days = 30) {
+    if (!courseId) {
+      throw new BadRequestException('Course id is required');
+    }
+
+    if (!Number.isInteger(days) || days <= 0 || days > 365) {
+      throw new BadRequestException('Days must be an integer between 1 and 365');
+    }
+
+    const course = await this.coursesRepository.findOne({
+      where: { id: courseId },
+    });
+    if (!course) {
+      throw new NotFoundException('Course not found');
+    }
+
+    const rangeEnd = new Date();
+    rangeEnd.setUTCHours(23, 59, 59, 999);
+
+    const rangeStart = new Date(rangeEnd);
+    rangeStart.setUTCDate(rangeStart.getUTCDate() - days + 1);
+    rangeStart.setUTCHours(0, 0, 0, 0);
+
+    const versions = await this.submitVersionsRepository
+      .createQueryBuilder('version')
+      .innerJoinAndSelect('version.submission', 'submission')
+      .innerJoinAndSelect('submission.assignment', 'assignment')
+      .innerJoinAndSelect('assignment.chapter', 'chapter')
+      .innerJoinAndSelect('chapter.course', 'course')
+      .where('course.id = :courseId', { courseId })
+      .andWhere('version.submittedAt BETWEEN :rangeStart AND :rangeEnd', {
+        rangeStart,
+        rangeEnd,
+      })
+      .orderBy('version.submittedAt', 'ASC')
+      .getMany();
+
+    const trendMap = new Map<string, number>();
+    for (let i = 0; i < days; i += 1) {
+      const date = new Date(rangeStart);
+      date.setUTCDate(rangeStart.getUTCDate() + i);
+      trendMap.set(date.toISOString().slice(0, 10), 0);
+    }
+
+    versions.forEach((version) => {
+      const key = version.submittedAt.toISOString().slice(0, 10);
+      if (!trendMap.has(key)) {
+        trendMap.set(key, 0);
+      }
+      trendMap.set(key, (trendMap.get(key) ?? 0) + 1);
+    });
+
+    const points = [...trendMap.entries()].map(([date, submissionCount]) => ({
+      date,
+      submissionCount,
+    }));
+
+    const totalSubmissions = points.reduce((sum, point) => sum + point.submissionCount, 0);
+    const peakPoint = points.reduce(
+      (peak, point) => (point.submissionCount > peak.submissionCount ? point : peak),
+      points[0] ?? { date: rangeStart.toISOString().slice(0, 10), submissionCount: 0 },
+    );
+
+    return {
+      course: {
+        id: course.id,
+        name: course.name,
+      },
+      range: {
+        days,
+        from: rangeStart.toISOString().slice(0, 10),
+        to: rangeEnd.toISOString().slice(0, 10),
+        granularity: 'day',
+      },
+      summary: {
+        totalSubmissions,
+        averagePerDay: Number((totalSubmissions / days).toFixed(2)),
+        peakDate: peakPoint.date,
+        peakSubmissionCount: peakPoint.submissionCount,
+      },
+      points,
     };
   }
 

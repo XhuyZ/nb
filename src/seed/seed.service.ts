@@ -32,16 +32,13 @@ import {
 import { User, UserRole } from 'src/users/entities/user.entity';
 import { DataSource, Repository } from 'typeorm';
 
+const STUDENT_COUNT = 30;
+
 const DEMO_IDS = {
   users: {
     admin1: '00000000-0000-4000-8000-000000000001',
     teacher1: '00000000-0000-4000-8000-000000000002',
     teacher2: '00000000-0000-4000-8000-000000000003',
-    student1: '00000000-0000-4000-8000-000000000011',
-    student2: '00000000-0000-4000-8000-000000000012',
-    student3: '00000000-0000-4000-8000-000000000013',
-    student4: '00000000-0000-4000-8000-000000000014',
-    student5: '00000000-0000-4000-8000-000000000015',
   },
   courses: {
     course1: '10000000-0000-4000-8000-000000000001',
@@ -59,28 +56,28 @@ const DEMO_IDS = {
     assignment3: '12000000-0000-4000-8000-000000000003',
     assignment4: '12000000-0000-4000-8000-000000000004',
   },
-  submissions: {
-    student1A1: '13000000-0000-4000-8000-000000000001',
-    student2A1: '13000000-0000-4000-8000-000000000002',
-    student1A3: '13000000-0000-4000-8000-000000000003',
-    student2A3: '13000000-0000-4000-8000-000000000004',
-  },
-  versions: {
-    student1A1v1: '14000000-0000-4000-8000-000000000001',
-    student2A1v1: '14000000-0000-4000-8000-000000000002',
-    student1A3v1: '14000000-0000-4000-8000-000000000003',
-    student1A3v2: '14000000-0000-4000-8000-000000000004',
-    student2A3v1: '14000000-0000-4000-8000-000000000005',
-  },
-  plagiarisms: {
-    a1High: '15000000-0000-4000-8000-000000000001',
-    a3High: '15000000-0000-4000-8000-000000000002',
-    a3Medium: '15000000-0000-4000-8000-000000000003',
-  },
-  reviews: {
-    confirmedCopy: '16000000-0000-4000-8000-000000000001',
-    needMoreReview: '16000000-0000-4000-8000-000000000002',
-  },
+};
+
+const buildDemoUuid = (prefix: string, index: number) =>
+  `${prefix}-0000-4000-8000-${index.toString().padStart(12, '0')}`;
+
+const studentId = (studentNumber: number) =>
+  buildDemoUuid('00000000', 100 + studentNumber);
+
+const submissionId = (group: number, index: number) =>
+  buildDemoUuid('13000000', group * 100 + index);
+
+const versionId = (group: number, index: number) =>
+  buildDemoUuid('14000000', group * 100 + index);
+
+const plagiarismId = (index: number) => buildDemoUuid('15000000', index);
+const reviewId = (index: number) => buildDemoUuid('16000000', index);
+
+const atUtcOffset = (base: Date, dayOffset: number, hour: number, minute = 0) => {
+  const date = new Date(base);
+  date.setUTCDate(date.getUTCDate() + dayOffset);
+  date.setUTCHours(hour, minute, 0, 0);
+  return date;
 };
 
 @Injectable()
@@ -150,56 +147,30 @@ export class SeedService implements OnApplicationBootstrap {
       status: true,
     });
 
-    const students = [
+    const students = Array.from({ length: STUDENT_COUNT }, (_, index) =>
       this.userRepository.create({
-        id: DEMO_IDS.users.student1,
-        username: 'student1',
+        id: studentId(index + 1),
+        username: `student${index + 1}`,
         password: '123456',
         role: UserRole.STUDENT,
         status: true,
       }),
-      this.userRepository.create({
-        id: DEMO_IDS.users.student2,
-        username: 'student2',
-        password: '123456',
-        role: UserRole.STUDENT,
-        status: true,
-      }),
-      this.userRepository.create({
-        id: DEMO_IDS.users.student3,
-        username: 'student3',
-        password: '123456',
-        role: UserRole.STUDENT,
-        status: true,
-      }),
-      this.userRepository.create({
-        id: DEMO_IDS.users.student4,
-        username: 'student4',
-        password: '123456',
-        role: UserRole.STUDENT,
-        status: true,
-      }),
-      this.userRepository.create({
-        id: DEMO_IDS.users.student5,
-        username: 'student5',
-        password: '123456',
-        role: UserRole.STUDENT,
-        status: true,
-      }),
-    ];
+    );
 
     await this.userRepository.save([admin, teacher1, teacher2, ...students]);
 
     const now = new Date();
-    const closedDeadline = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
-    const openDeadline = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const closedDeadline = atUtcOffset(now, -5, 23, 59);
+    const openDeadline = atUtcOffset(now, 7, 23, 59);
+    const lateAllowedDeadline = atUtcOffset(now, -2, 23, 59);
 
-    const course = await this.courseRepository.save(
+    const course1 = await this.courseRepository.save(
       this.courseRepository.create({
         id: DEMO_IDS.courses.course1,
         teacher: teacher1,
         name: 'Course 1 - Algorithm Foundations',
-        description: 'Khoa hoc gom 3 chuong, moi chuong 1 assignment',
+        description:
+          'Demo course for teacher1 with 30 enrolled students, realistic submission history, and review verdict cases.',
         isPublished: true,
       }),
     );
@@ -207,32 +178,32 @@ export class SeedService implements OnApplicationBootstrap {
     const chapter1 = await this.chapterRepository.save(
       this.chapterRepository.create({
         id: DEMO_IDS.chapters.chapter1,
-        course,
-        title: 'Chuong 1 - Loops and Arrays',
+        course: course1,
+        title: 'Chapter 1 - Loops and Arrays',
         orderIndex: 1,
       }),
     );
     const chapter2 = await this.chapterRepository.save(
       this.chapterRepository.create({
         id: DEMO_IDS.chapters.chapter2,
-        course,
-        title: 'Chuong 2 - Recursion',
+        course: course1,
+        title: 'Chapter 2 - Recursion',
         orderIndex: 2,
       }),
     );
     const chapter3 = await this.chapterRepository.save(
       this.chapterRepository.create({
         id: DEMO_IDS.chapters.chapter3,
-        course,
-        title: 'Chuong 3 - Dynamic Programming',
+        course: course1,
+        title: 'Chapter 3 - Dynamic Programming',
         orderIndex: 3,
       }),
     );
 
     await this.courseMemberRepository.save(
-      students.slice(0, 4).map((student) =>
+      students.map((student) =>
         this.courseMemberRepository.create({
-          course,
+          course: course1,
           student,
           active: true,
         }),
@@ -244,7 +215,7 @@ export class SeedService implements OnApplicationBootstrap {
         id: DEMO_IDS.courses.course2,
         teacher: teacher2,
         name: 'Course 2 - Data Structures',
-        description: 'Khoa hoc cua teacher2 de demo bo loc theo giao vien',
+        description: 'Secondary course for teacher2 to keep teacher filter demos available.',
         isPublished: true,
       }),
     );
@@ -252,7 +223,7 @@ export class SeedService implements OnApplicationBootstrap {
       this.chapterRepository.create({
         id: DEMO_IDS.chapters.chapter4,
         course: course2,
-        title: 'Chuong 1 - Stack Queue',
+        title: 'Chapter 1 - Stack and Queue',
         orderIndex: 1,
       }),
     );
@@ -261,13 +232,14 @@ export class SeedService implements OnApplicationBootstrap {
       id: DEMO_IDS.assignments.assignment1,
       teacher: teacher1,
       chapter: chapter1,
-      title: 'Assignment 1 - Loops and Arrays',
-      description: 'Bai tap da het han, 5 sinh vien da nop bai',
+      title: 'Assignment 1 - Array Sum Analyzer',
+      description:
+        'A closed assignment with all 30 students submitting across multiple dates for dashboard trend demos.',
       deadline: closedDeadline,
       status: AssignmentStatus.CLOSED,
       maxScore: 100,
       evaluationCriteria:
-        '- Dung ket qua\n- Toi uu bo nho\n- Trinh bay ro rang',
+        '- Correct output\n- Clean iteration logic\n- Good code readability',
       allowLateSubmission: false,
       document: 'http://localhost:3000/uploads/assignment-1.pdf',
     });
@@ -276,26 +248,31 @@ export class SeedService implements OnApplicationBootstrap {
       id: DEMO_IDS.assignments.assignment2,
       teacher: teacher1,
       chapter: chapter2,
-      title: 'Assignment 2 - Recursion',
-      description: 'Bai tap chua co submission',
+      title: 'Assignment 2 - Recursive Thinking',
+      description: 'An open assignment reserved for create and list assignment demos.',
       deadline: openDeadline,
       status: AssignmentStatus.OPEN,
-      maxScore: 10,
-      evaluationCriteria: '- Dung test case co ban\n- Viet de doc',
+      maxScore: 100,
+      evaluationCriteria:
+        '- Correct recursion base case\n- Good readability\n- Matches sample tests',
       allowLateSubmission: false,
+      document: 'http://localhost:3000/uploads/assignment-2.pdf',
     });
 
     const assignmentLateAllowed = this.assignmentRepository.create({
       id: DEMO_IDS.assignments.assignment3,
       teacher: teacher1,
       chapter: chapter3,
-      title: 'Assignment 3 - Dynamic Programming',
-      description: 'Demo case nop tre han va nop nhieu lan',
-      deadline: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+      title: 'Assignment 3 - Fibonacci Optimizer',
+      description:
+        'A late-allowed assignment with resubmissions to make submission trends look realistic.',
+      deadline: lateAllowedDeadline,
       status: AssignmentStatus.OPEN,
       maxScore: 100,
-      evaluationCriteria: '- Correctness 70%\n- Complexity 20%\n- Style 10%',
+      evaluationCriteria:
+        '- Correctness 70%\n- Complexity 20%\n- Code style 10%',
       allowLateSubmission: true,
+      document: 'http://localhost:3000/uploads/assignment-3.pdf',
     });
 
     await this.assignmentRepository.save([
@@ -315,12 +292,13 @@ export class SeedService implements OnApplicationBootstrap {
         teacher: teacher2,
         chapter: course2Chapter,
         title: 'Assignment 4 - Stack Basics',
-        description: 'Assignment thuoc course teacher2, chua co nop bai',
-        deadline: new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000),
+        description: 'Teacher2 assignment kept for course filtering and ownership demos.',
+        deadline: atUtcOffset(now, 5, 23, 59),
         status: AssignmentStatus.OPEN,
         maxScore: 100,
         evaluationCriteria: '- Correctness\n- Time complexity',
         allowLateSubmission: false,
+        document: 'http://localhost:3000/uploads/assignment-4.pdf',
       }),
     );
     course2Chapter.assignment = teacher2Assignment;
@@ -371,6 +349,14 @@ export class SeedService implements OnApplicationBootstrap {
         fileUrl: 'http://localhost:3000/uploads/loops-guideline.pdf',
       }),
       this.assignmentDocumentRepository.create({
+        assignment: assignmentOpen,
+        uploadedBy: teacher1,
+        fileName: 'recursion-reference.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 28410,
+        fileUrl: 'http://localhost:3000/uploads/recursion-reference.pdf',
+      }),
+      this.assignmentDocumentRepository.create({
         assignment: assignmentLateAllowed,
         uploadedBy: teacher1,
         fileName: 'dp-examples.docx',
@@ -381,41 +367,55 @@ export class SeedService implements OnApplicationBootstrap {
       }),
     ]);
 
-    const submissions: Submission[] = students.map((student, index) =>
-      this.submissionRepository.create({
-        id:
-          index === 0
-            ? DEMO_IDS.submissions.student1A1
-            : index === 1
-              ? DEMO_IDS.submissions.student2A1
-              : undefined,
+    const assignment1DayOffsets = [
+      28, 27, 27, 26, 25, 24, 24, 23, 22, 22,
+      21, 20, 19, 19, 18, 17, 16, 15, 15, 14,
+      13, 12, 11, 10, 10, 9, 8, 7, 6, 6,
+    ];
+    const assignment3InitialOffsets = [8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3];
+    const assignment3ResubmissionOffsets = [4, 3, 3, 2, 2, 1, 1, 0];
+
+    const assignment1Submissions = students.map((student, index) => {
+      const studentNumber = index + 1;
+      const isFlagged = index < 3;
+      const submittedAt = atUtcOffset(
+        now,
+        -assignment1DayOffsets[index],
+        9 + (index % 5),
+        (index * 7) % 60,
+      );
+
+      const suspiciousCodes = [
+        'function solve(nums) { let total = 0; for (const value of nums) { total += value; } return total; }',
+        'function solve(nums) { let total = 0; for (const value of nums) { total += value; } return total; }',
+        'function solve(nums) { let total = 0; for (const value of nums) { total = total + value; } return total; }',
+      ];
+
+      return this.submissionRepository.create({
+        id: submissionId(1, studentNumber),
         student,
         assignment: assignmentClosed,
-        code: `function solve() { return ${index + 1}; }`,
+        code:
+          suspiciousCodes[index] ??
+          `function solve(nums) { return nums.reduce((sum, value) => sum + value, 0); } // student${studentNumber}`,
         file: undefined,
         language: SubmissionLanguage.JAVASCRIPT,
         versionCount: 1,
-        lastSubmittedAt: new Date(closedDeadline.getTime() - 2 * 60 * 60 * 1000),
-        highestSimilarity: index < 2 ? 0.82 : 0.18,
-        plagiarismFlag: index < 2,
-        passRate: index < 2 ? 50 : 100,
+        lastSubmittedAt: submittedAt,
+        highestSimilarity: isFlagged ? [0.94, 0.92, 0.89][index] : 0.14 + (index % 5) * 0.03,
+        plagiarismFlag: isFlagged,
+        passRate: isFlagged ? [62, 58, 60][index] : 72 + (index % 5) * 7,
         judgeStatus: ProcessingStatus.COMPLETED,
         plagiarismStatus: ProcessingStatus.COMPLETED,
-        score: index < 2 ? 50 : 100,
+        score: isFlagged ? [62, 58, 60][index] : 72 + (index % 5) * 7,
         status: SubmissionStatus.SUBMITTED,
-      }),
-    );
+      });
+    });
+    await this.submissionRepository.save(assignment1Submissions);
 
-    const savedSubmissions = await this.submissionRepository.save(submissions);
-
-    const submitVersions = savedSubmissions.map((submission) =>
+    const assignment1Versions = assignment1Submissions.map((submission, index) =>
       this.submitVersionRepository.create({
-        id:
-          submission.id === DEMO_IDS.submissions.student1A1
-            ? DEMO_IDS.versions.student1A1v1
-            : submission.id === DEMO_IDS.submissions.student2A1
-              ? DEMO_IDS.versions.student2A1v1
-              : undefined,
+        id: versionId(1, index + 1),
         submission,
         version: 1,
         codeSnapshot: submission.code,
@@ -423,155 +423,205 @@ export class SeedService implements OnApplicationBootstrap {
         fileName: undefined,
         fileMimeType: undefined,
         fileSize: undefined,
-        submittedAt:
-          submission.lastSubmittedAt ??
-          new Date(closedDeadline.getTime() - 2 * 60 * 60 * 1000),
+        submittedAt: submission.lastSubmittedAt ?? closedDeadline,
         status: SubmitVersionStatus.ACTIVE,
       }),
     );
+    await this.submitVersionRepository.save(assignment1Versions);
 
-    const savedVersions = await this.submitVersionRepository.save(submitVersions);
+    const assignment3Students = students.slice(0, assignment3InitialOffsets.length);
+    const assignment3Submissions = assignment3Students.map((student, index) => {
+      const studentNumber = index + 1;
+      const hasResubmission = index < assignment3ResubmissionOffsets.length;
+      const activeSubmittedAt = hasResubmission
+        ? atUtcOffset(now, -assignment3ResubmissionOffsets[index], 18 - (index % 4), 10)
+        : atUtcOffset(now, -assignment3InitialOffsets[index], 11 + (index % 3), 25);
+      const isFlagged = index === 3 || index === 4;
+      const activeCodes = [
+        'function solveDp(n) { if (n <= 1) return n; return solveDp(n - 1) + solveDp(n - 2); }',
+        'function solveDp(n) { const memo = [0, 1]; for (let i = 2; i <= n; i += 1) memo[i] = memo[i - 1] + memo[i - 2]; return memo[n] ?? 0; }',
+        'function solveDp(n) { let prev = 0; let curr = 1; for (let i = 0; i < n; i += 1) { [prev, curr] = [curr, prev + curr]; } return prev; }',
+        'function solveDp(n){if(n<=1){return n;}return solveDp(n-1)+solveDp(n-2);}',
+        'function solveDp(n){if(n<=1){return n;}return solveDp(n-1)+solveDp(n-2);}',
+      ];
 
-    const student1LateSubmission = await this.submissionRepository.save(
-      this.submissionRepository.create({
-        id: DEMO_IDS.submissions.student1A3,
-        student: students[0],
+      const normalScore = 68 + (index % 4) * 8;
+
+      return this.submissionRepository.create({
+        id: submissionId(2, studentNumber),
+        student,
         assignment: assignmentLateAllowed,
-        code: 'function solveDp(n){ if(n<=1) return n; return solveDp(n-1)+solveDp(n-2); }',
-        file: 'http://localhost:3000/uploads/student1-dp-v2.zip',
+        code:
+          activeCodes[index] ??
+          `function solveDp(n) { const dp = [0, 1]; for (let i = 2; i <= n; i += 1) dp[i] = dp[i - 1] + dp[i - 2]; return dp[n] ?? n; } // student${studentNumber}`,
+        file: `http://localhost:3000/uploads/student${studentNumber}-assignment3.zip`,
         language: SubmissionLanguage.JAVASCRIPT,
         status: SubmissionStatus.SUBMITTED,
-        versionCount: 2,
-        lastSubmittedAt: new Date(now.getTime() + 5 * 60 * 1000),
-        highestSimilarity: 0.91,
-        plagiarismFlag: true,
-        passRate: 50,
+        versionCount: hasResubmission ? 2 : 1,
+        lastSubmittedAt: activeSubmittedAt,
+        highestSimilarity: isFlagged ? (index === 3 ? 0.93 : 0.91) : 0.18 + (index % 4) * 0.04,
+        plagiarismFlag: isFlagged,
+        passRate: isFlagged ? 55 : normalScore,
         judgeStatus: ProcessingStatus.COMPLETED,
         plagiarismStatus: ProcessingStatus.COMPLETED,
-        score: 50,
-      }),
-    );
+        score: isFlagged ? 55 : normalScore,
+      });
+    });
+    await this.submissionRepository.save(assignment3Submissions);
 
-    const student2LateSubmission = await this.submissionRepository.save(
-      this.submissionRepository.create({
-        id: DEMO_IDS.submissions.student2A3,
-        student: students[1],
-        assignment: assignmentLateAllowed,
-        code: 'function solveDp(n){if(n<=1){return n;}return solveDp(n-1)+solveDp(n-2);}',
-        file: 'http://localhost:3000/uploads/student2-dp.zip',
-        language: SubmissionLanguage.JAVASCRIPT,
-        status: SubmissionStatus.SUBMITTED,
-        versionCount: 1,
-        lastSubmittedAt: new Date(now.getTime() - 30 * 60 * 1000),
-        highestSimilarity: 0.91,
-        plagiarismFlag: true,
-        passRate: 50,
-        judgeStatus: ProcessingStatus.COMPLETED,
-        plagiarismStatus: ProcessingStatus.COMPLETED,
-        score: 50,
-      }),
-    );
+    const assignment3InitialVersions: SubmitVersion[] = [];
+    const assignment3ActiveVersions: SubmitVersion[] = [];
+    const assignment3AllVersions: SubmitVersion[] = [];
 
-    const lateVersion1 = await this.submitVersionRepository.save(
-      this.submitVersionRepository.create({
-        id: DEMO_IDS.versions.student1A3v1,
-        submission: student1LateSubmission,
+    assignment3Submissions.forEach((submission, index) => {
+      const studentNumber = index + 1;
+      const hasResubmission = index < assignment3ResubmissionOffsets.length;
+      const initialVersion = this.submitVersionRepository.create({
+        id: versionId(2, studentNumber),
+        submission,
         version: 1,
         codeSnapshot:
-          'function solveDp(n){ if(n<=1) return n; return solveDp(n-1)+solveDp(n-2); }',
-        fileUrl: 'http://localhost:3000/uploads/student1-dp-v1.zip',
-        fileName: 'student1-dp-v1.zip',
+          index === 3 || index === 4
+            ? 'function solveDp(n){ if(n<=1) return n; return solveDp(n-1)+solveDp(n-2); }'
+            : `function solveDp(n) { if (n <= 1) return n; return solveDp(n - 1) + solveDp(n - 2); } // v1 student${studentNumber}`,
+        fileUrl: `http://localhost:3000/uploads/student${studentNumber}-assignment3-v1.zip`,
+        fileName: `student${studentNumber}-assignment3-v1.zip`,
         fileMimeType: 'application/zip',
-        fileSize: 2012,
-        submittedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
-        status: SubmitVersionStatus.ARCHIVED,
-      }),
-    );
+        fileSize: 2100 + index * 31,
+        submittedAt: atUtcOffset(
+          now,
+          -assignment3InitialOffsets[index],
+          10 + (index % 4),
+          5,
+        ),
+        status: hasResubmission ? SubmitVersionStatus.ARCHIVED : SubmitVersionStatus.ACTIVE,
+      });
 
-    const lateVersion2 = await this.submitVersionRepository.save(
-      this.submitVersionRepository.create({
-        id: DEMO_IDS.versions.student1A3v2,
-        submission: student1LateSubmission,
-        version: 2,
-        codeSnapshot:
-          'function solveDp(n){ if(n<=1) return n; return solveDp(n-1)+solveDp(n-2); }',
-        fileUrl: 'http://localhost:3000/uploads/student1-dp-v2.zip',
-        fileName: 'student1-dp-v2.zip',
-        fileMimeType: 'application/zip',
-        fileSize: 2450,
-        submittedAt: new Date(now.getTime() + 5 * 60 * 1000),
-        status: SubmitVersionStatus.ACTIVE,
-      }),
-    );
+      assignment3InitialVersions.push(initialVersion);
+      assignment3AllVersions.push(initialVersion);
 
-    const lateVersion3 = await this.submitVersionRepository.save(
-      this.submitVersionRepository.create({
-        id: DEMO_IDS.versions.student2A3v1,
-        submission: student2LateSubmission,
-        version: 1,
-        codeSnapshot:
-          'function solveDp(n){if(n<=1){return n;}return solveDp(n-1)+solveDp(n-2);}',
-        fileUrl: 'http://localhost:3000/uploads/student2-dp.zip',
-        fileName: 'student2-dp.zip',
-        fileMimeType: 'application/zip',
-        fileSize: 2199,
-        submittedAt: new Date(now.getTime() - 30 * 60 * 1000),
-        status: SubmitVersionStatus.ACTIVE,
-      }),
-    );
+      if (hasResubmission) {
+        const activeVersion = this.submitVersionRepository.create({
+          id: versionId(3, studentNumber),
+          submission,
+          version: 2,
+          codeSnapshot: submission.code,
+          fileUrl: submission.file,
+          fileName: `student${studentNumber}-assignment3-v2.zip`,
+          fileMimeType: 'application/zip',
+          fileSize: 2400 + index * 37,
+          submittedAt: submission.lastSubmittedAt ?? lateAllowedDeadline,
+          status: SubmitVersionStatus.ACTIVE,
+        });
+        assignment3ActiveVersions.push(activeVersion);
+        assignment3AllVersions.push(activeVersion);
+        return;
+      }
+
+      assignment3ActiveVersions.push(initialVersion);
+    });
+    await this.submitVersionRepository.save(assignment3AllVersions);
 
     await this.plagiarismRepository.save([
       this.plagiarismRepository.create({
-        id: DEMO_IDS.plagiarisms.a1High,
-        submitVersionA: savedVersions[0],
-        submitVersionB: savedVersions[1],
-        similarity: 0.82,
+        id: plagiarismId(1),
+        submitVersionA: assignment1Versions[0],
+        submitVersionB: assignment1Versions[1],
+        similarity: 0.94,
         highRisk: true,
         evidence: {
-          commonTokens: ['function', 'solve', 'return'],
-          commonLines: ['function solve() { return 1; }'],
+          commonTokens: ['function', 'solve', 'total', 'return'],
+          commonLines: ['for (const value of nums) { total += value; }'],
+          astNodesA: ['FunctionDeclaration', 'ForOfStatement', 'ReturnStatement'],
+          astNodesB: ['FunctionDeclaration', 'ForOfStatement', 'ReturnStatement'],
         },
       }),
       this.plagiarismRepository.create({
-        id: DEMO_IDS.plagiarisms.a3High,
-        submitVersionA: lateVersion2,
-        submitVersionB: lateVersion3,
-        similarity: 0.91,
+        id: plagiarismId(2),
+        submitVersionA: assignment1Versions[0],
+        submitVersionB: assignment1Versions[2],
+        similarity: 0.89,
         highRisk: true,
         evidence: {
-          commonTokens: ['solveDp', 'return', 'n', 'if'],
+          commonTokens: ['function', 'solve', 'total', 'value'],
+          commonLines: ['let total = 0;', 'return total;'],
+          astNodesA: ['VariableDeclaration', 'ForOfStatement'],
+          astNodesB: ['VariableDeclaration', 'ForOfStatement'],
+        },
+      }),
+      this.plagiarismRepository.create({
+        id: plagiarismId(3),
+        submitVersionA: assignment1Versions[1],
+        submitVersionB: assignment1Versions[2],
+        similarity: 0.86,
+        highRisk: true,
+        evidence: {
+          commonTokens: ['solve', 'total', 'return'],
+          commonLines: ['function solve(nums) { let total = 0;'],
+          astNodesA: ['FunctionDeclaration', 'Identifier'],
+          astNodesB: ['FunctionDeclaration', 'Identifier'],
+        },
+      }),
+      this.plagiarismRepository.create({
+        id: plagiarismId(4),
+        submitVersionA: assignment3ActiveVersions[3],
+        submitVersionB: assignment3ActiveVersions[4],
+        similarity: 0.93,
+        highRisk: true,
+        evidence: {
+          commonTokens: ['solveDp', 'if', 'return', 'n'],
           commonLines: ['return solveDp(n-1)+solveDp(n-2);'],
+          astNodesA: ['IfStatement', 'BinaryExpression', 'CallExpression'],
+          astNodesB: ['IfStatement', 'BinaryExpression', 'CallExpression'],
         },
       }),
       this.plagiarismRepository.create({
-        id: DEMO_IDS.plagiarisms.a3Medium,
-        submitVersionA: lateVersion1,
-        submitVersionB: lateVersion3,
-        similarity: 0.65,
+        id: plagiarismId(5),
+        submitVersionA: assignment3InitialVersions[3],
+        submitVersionB: assignment3ActiveVersions[4],
+        similarity: 0.68,
         highRisk: false,
         evidence: {
           commonTokens: ['solveDp', 'return'],
-          commonLines: [],
+          commonLines: ['if(n<=1){return n;}'],
+          astNodesA: ['IfStatement', 'ReturnStatement'],
+          astNodesB: ['IfStatement', 'ReturnStatement'],
         },
       }),
     ]);
 
     await this.plagiarismReviewRepository.save([
       this.plagiarismReviewRepository.create({
-        id: DEMO_IDS.reviews.confirmedCopy,
-        submission: student1LateSubmission,
-        reviewer: teacher1,
-        verdict: ReviewVerdict.CONFIRMED_COPY,
-        note: 'Trung lap cao o cac ham de quy, can xu ly vi pham',
-        reviewedAt: new Date(now.getTime() - 10 * 60 * 1000),
-      }),
-      this.plagiarismReviewRepository.create({
-        id: DEMO_IDS.reviews.needMoreReview,
-        submission: savedSubmissions[0],
+        id: reviewId(1),
+        submission: assignment1Submissions[0],
         reviewer: teacher1,
         verdict: ReviewVerdict.NEED_MORE_REVIEW,
-        note: 'Can phan tich them lich su nop va bang chung AST',
-        reviewedAt: new Date(now.getTime() - 5 * 60 * 1000),
+        note: 'Requires manual review because the token match and AST structure are unusually close.',
+        reviewedAt: atUtcOffset(now, -1, 10, 15),
+      }),
+      this.plagiarismReviewRepository.create({
+        id: reviewId(2),
+        submission: assignment1Submissions[1],
+        reviewer: teacher1,
+        verdict: ReviewVerdict.CONFIRMED_COPY,
+        note: 'Confirmed copy after comparing nearly identical loop structure and variable naming.',
+        reviewedAt: atUtcOffset(now, -1, 11, 30),
+      }),
+      this.plagiarismReviewRepository.create({
+        id: reviewId(3),
+        submission: assignment3Submissions[3],
+        reviewer: teacher1,
+        verdict: ReviewVerdict.CONFIRMED_COPY,
+        note: 'Recursive implementation matches another student version with very high similarity.',
+        reviewedAt: atUtcOffset(now, 0, 9, 45),
+      }),
+      this.plagiarismReviewRepository.create({
+        id: reviewId(4),
+        submission: assignment3Submissions[4],
+        reviewer: teacher1,
+        verdict: ReviewVerdict.VALID,
+        note: 'Reviewed and kept as valid because the student provided a credible explanation during follow-up.',
+        reviewedAt: atUtcOffset(now, 0, 13, 5),
       }),
     ]);
 
@@ -579,12 +629,14 @@ export class SeedService implements OnApplicationBootstrap {
       this.reportRepository.create({
         generatedBy: teacher1,
         type: ReportType.ACADEMIC_INTEGRITY,
-        courseId: course.id,
+        courseId: course1.id,
         fileName: 'seed-demo-report.pdf',
         fileUrl: 'http://localhost:3000/uploads/reports/seed-demo-report.pdf',
         metadata: {
           seeded: true,
-          note: 'Bao cao mau cho demo stakeholder',
+          studentCount: STUDENT_COUNT,
+          highRiskReviewCases: 5,
+          note: 'Seeded dashboard and review data for stakeholder demo.',
         },
       }),
     );
@@ -598,46 +650,78 @@ export class SeedService implements OnApplicationBootstrap {
       order: { orderIndex: 'ASC' },
     });
 
-    if (savedSubmissions[0] && savedVersions[0] && closedCases.length > 0) {
+    if (closedCases.length > 1) {
       await this.submissionTestResultRepository.save([
         this.submissionTestResultRepository.create({
-          submission: savedSubmissions[0],
-          submitVersion: savedVersions[0],
+          submission: assignment1Submissions[0],
+          submitVersion: assignment1Versions[0],
           testCase: closedCases[0],
           passed: true,
           actualOutput: '3',
           executionTimeMs: 12,
         }),
         this.submissionTestResultRepository.create({
-          submission: savedSubmissions[0],
-          submitVersion: savedVersions[0],
+          submission: assignment1Submissions[0],
+          submitVersion: assignment1Versions[0],
           testCase: closedCases[1],
           passed: false,
           actualOutput: '29',
           errorMessage: 'Wrong answer',
           executionTimeMs: 9,
         }),
+        this.submissionTestResultRepository.create({
+          submission: assignment1Submissions[9],
+          submitVersion: assignment1Versions[9],
+          testCase: closedCases[0],
+          passed: true,
+          actualOutput: '3',
+          executionTimeMs: 8,
+        }),
+        this.submissionTestResultRepository.create({
+          submission: assignment1Submissions[9],
+          submitVersion: assignment1Versions[9],
+          testCase: closedCases[1],
+          passed: true,
+          actualOutput: '30',
+          executionTimeMs: 7,
+        }),
       ]);
     }
 
-    if (student1LateSubmission && lateVersion2 && lateCases.length > 0) {
+    if (lateCases.length > 1) {
       await this.submissionTestResultRepository.save([
         this.submissionTestResultRepository.create({
-          submission: student1LateSubmission,
-          submitVersion: lateVersion2,
+          submission: assignment3Submissions[3],
+          submitVersion: assignment3ActiveVersions[3],
           testCase: lateCases[0],
           passed: true,
           actualOutput: '5',
           executionTimeMs: 6,
         }),
         this.submissionTestResultRepository.create({
-          submission: student1LateSubmission,
-          submitVersion: lateVersion2,
+          submission: assignment3Submissions[3],
+          submitVersion: assignment3ActiveVersions[3],
           testCase: lateCases[1],
           passed: false,
           actualOutput: '34',
           errorMessage: 'Wrong answer',
-          executionTimeMs: 10,
+          executionTimeMs: 11,
+        }),
+        this.submissionTestResultRepository.create({
+          submission: assignment3Submissions[10],
+          submitVersion: assignment3ActiveVersions[10],
+          testCase: lateCases[0],
+          passed: true,
+          actualOutput: '5',
+          executionTimeMs: 5,
+        }),
+        this.submissionTestResultRepository.create({
+          submission: assignment3Submissions[10],
+          submitVersion: assignment3ActiveVersions[10],
+          testCase: lateCases[1],
+          passed: true,
+          actualOutput: '55',
+          executionTimeMs: 7,
         }),
       ]);
     }

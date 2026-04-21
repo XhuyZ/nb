@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { Course } from 'src/courses/entities/course.entity';
 import { Plagiarism } from 'src/plagiarisms/entities/plagiarism.entity';
+import { SubmitVersion } from 'src/submit-versions/entities/submit-version.entity';
 import { Submission } from 'src/submissions/entities/submission.entity';
 import { User } from 'src/users/entities/user.entity';
 import { AcademicReport } from './entities/academic-report.entity';
@@ -13,6 +14,7 @@ import { StatisticsReportingService } from './statistics-reporting.service';
   imports: [
     TypeOrmModule.forFeature([
       Submission,
+      SubmitVersion,
       Plagiarism,
       Assignment,
       Course,

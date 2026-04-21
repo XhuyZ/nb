@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ResponseMessage } from 'src/common/decorators/response-message.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -27,6 +27,32 @@ export class StatisticsReportingController {
   @ApiOperation({ summary: 'Du lieu bieu do phan bo va xu huong' })
   getVisualization(@Query('courseId') courseId?: string) {
     return this.reportingService.getVisualizationData(courseId);
+  }
+
+  @Get('submission-trends')
+  @Roles(UserRole.ADMIN, UserRole.TEACHER)
+  @ApiOperation({ summary: 'Submission trend data for dashboard' })
+  @ApiQuery({
+    name: 'courseId',
+    required: true,
+    type: String,
+    description: 'Course id to build trend chart',
+  })
+  @ApiQuery({
+    name: 'days',
+    required: false,
+    type: Number,
+    description: 'Recent number of days to include, default 30',
+  })
+  @ResponseMessage('Submission trends retrieved successfully')
+  getSubmissionTrends(
+    @Query('courseId') courseId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.reportingService.getSubmissionTrends(
+      courseId,
+      days ? Number(days) : undefined,
+    );
   }
 
   @Post('export-pdf')
