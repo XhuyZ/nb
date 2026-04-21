@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { Course } from 'src/courses/entities/course.entity';
 import { Plagiarism } from 'src/plagiarisms/entities/plagiarism.entity';
+import { PlagiarismReview } from 'src/review-verdict/entities/plagiarism-review.entity';
 import { SubmitVersion } from 'src/submit-versions/entities/submit-version.entity';
 import { Submission } from 'src/submissions/entities/submission.entity';
 import { User } from 'src/users/entities/user.entity';
@@ -16,6 +17,7 @@ import { StatisticsReportingService } from './statistics-reporting.service';
       Submission,
       SubmitVersion,
       Plagiarism,
+      PlagiarismReview,
       Assignment,
       Course,
       AcademicReport,
