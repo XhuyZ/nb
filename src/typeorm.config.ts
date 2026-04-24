@@ -11,6 +11,6 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   autoLoadEntities: true,
-	dropSchema: true,
+  dropSchema: false,
   synchronize: true,
 };

@@ -112,10 +112,15 @@ export class SeedService implements OnApplicationBootstrap {
     private readonly plagiarismRepository: Repository<Plagiarism>,
     @InjectRepository(PlagiarismReview)
     private readonly plagiarismReviewRepository: Repository<PlagiarismReview>,
-  ) {}
+  ) { }
 
   async onApplicationBootstrap() {
-    await this.seed();
+    const userCount = await this.userRepository.count();
+    if (userCount === 0) {
+      await this.seed();
+    } else {
+      this.logger.log('Database already seeded, skipping auto-seed');
+    }
   }
 
   private async seed() {
@@ -386,9 +391,35 @@ export class SeedService implements OnApplicationBootstrap {
       );
 
       const suspiciousCodes = [
-        'function solve(nums) { let total = 0; for (const value of nums) { total += value; } return total; }',
-        'function solve(nums) { let total = 0; for (const value of nums) { total += value; } return total; }',
-        'function solve(nums) { let total = 0; for (const value of nums) { total = total + value; } return total; }',
+        `function analyzeArray(arr) {
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] !== null && arr[i] !== undefined) {
+      sum += arr[i];
+      count++;
+    }
+  }
+  return { sum, count, average: count > 0 ? sum / count : 0 };
+}`,
+        `function analyzeArray(items) {
+  let total = 0;
+  let totalCount = 0;
+  for (let j = 0; j < items.length; j++) {
+    if (items[j] !== null && items[j] !== undefined) {
+      total += items[j];
+      totalCount++;
+    }
+  }
+  return { sum: total, count: totalCount, average: totalCount > 0 ? total / totalCount : 0 };
+}`,
+        `function solve(nums) { 
+  let total = 0; 
+  for (const value of nums) { 
+    total = total + value; 
+  } 
+  return total; 
+}`,
       ];
 
       return this.submissionRepository.create({
@@ -397,7 +428,7 @@ export class SeedService implements OnApplicationBootstrap {
         assignment: assignmentClosed,
         code:
           suspiciousCodes[index] ??
-          `function solve(nums) { return nums.reduce((sum, value) => sum + value, 0); } // student${studentNumber}`,
+          `function analyzeArray(nums) { return { sum: nums.reduce((a, b) => a + b, 0) }; } // student${studentNumber}`,
         file: undefined,
         language: SubmissionLanguage.JAVASCRIPT,
         versionCount: 1,
@@ -529,12 +560,7 @@ export class SeedService implements OnApplicationBootstrap {
         submitVersionB: assignment1Versions[1],
         similarity: 0.94,
         highRisk: true,
-        evidence: {
-          commonTokens: ['function', 'solve', 'total', 'return'],
-          commonLines: ['for (const value of nums) { total += value; }'],
-          astNodesA: ['FunctionDeclaration', 'ForOfStatement', 'ReturnStatement'],
-          astNodesB: ['FunctionDeclaration', 'ForOfStatement', 'ReturnStatement'],
-        },
+        evidence: {},
       }),
       this.plagiarismRepository.create({
         id: plagiarismId(2),
@@ -542,12 +568,7 @@ export class SeedService implements OnApplicationBootstrap {
         submitVersionB: assignment1Versions[2],
         similarity: 0.89,
         highRisk: true,
-        evidence: {
-          commonTokens: ['function', 'solve', 'total', 'value'],
-          commonLines: ['let total = 0;', 'return total;'],
-          astNodesA: ['VariableDeclaration', 'ForOfStatement'],
-          astNodesB: ['VariableDeclaration', 'ForOfStatement'],
-        },
+        evidence: {},
       }),
       this.plagiarismRepository.create({
         id: plagiarismId(3),
@@ -555,12 +576,7 @@ export class SeedService implements OnApplicationBootstrap {
         submitVersionB: assignment1Versions[2],
         similarity: 0.86,
         highRisk: true,
-        evidence: {
-          commonTokens: ['solve', 'total', 'return'],
-          commonLines: ['function solve(nums) { let total = 0;'],
-          astNodesA: ['FunctionDeclaration', 'Identifier'],
-          astNodesB: ['FunctionDeclaration', 'Identifier'],
-        },
+        evidence: {},
       }),
       this.plagiarismRepository.create({
         id: plagiarismId(4),
@@ -568,12 +584,7 @@ export class SeedService implements OnApplicationBootstrap {
         submitVersionB: assignment3ActiveVersions[4],
         similarity: 0.93,
         highRisk: true,
-        evidence: {
-          commonTokens: ['solveDp', 'if', 'return', 'n'],
-          commonLines: ['return solveDp(n-1)+solveDp(n-2);'],
-          astNodesA: ['IfStatement', 'BinaryExpression', 'CallExpression'],
-          astNodesB: ['IfStatement', 'BinaryExpression', 'CallExpression'],
-        },
+        evidence: {},
       }),
       this.plagiarismRepository.create({
         id: plagiarismId(5),
@@ -581,12 +592,7 @@ export class SeedService implements OnApplicationBootstrap {
         submitVersionB: assignment3ActiveVersions[4],
         similarity: 0.68,
         highRisk: false,
-        evidence: {
-          commonTokens: ['solveDp', 'return'],
-          commonLines: ['if(n<=1){return n;}'],
-          astNodesA: ['IfStatement', 'ReturnStatement'],
-          astNodesB: ['IfStatement', 'ReturnStatement'],
-        },
+        evidence: {},
       }),
     ]);
 
