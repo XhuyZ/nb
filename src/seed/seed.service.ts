@@ -120,7 +120,7 @@ export class SeedService implements OnApplicationBootstrap {
 
   private async seed() {
     await this.dataSource.query(
-      'TRUNCATE TABLE "plagiarisms", "plagiarism_reviews", "academic_reports", "submission_test_results", "submit_versions", "submissions", "assignment_test_cases", "assignment_documents", "chapters", "course_members", "courses", "assignments", "users" RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE "password_reset_tokens", "plagiarisms", "plagiarism_reviews", "academic_reports", "submission_test_results", "submit_versions", "submissions", "assignment_test_cases", "assignment_documents", "chapters", "course_members", "courses", "assignments", "users" RESTART IDENTITY CASCADE',
     );
 
     const admin = this.userRepository.create({
