@@ -8,6 +8,14 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+export interface EvidenceSegment {
+  title: string;
+  description: string;
+  similarity: number;
+  linesA: [number, number];
+  linesB: [number, number];
+}
+
 @Entity('plagiarisms')
 export class Plagiarism {
   @PrimaryGeneratedColumn('uuid')
@@ -31,6 +39,7 @@ export class Plagiarism {
     commonLines: string[];
     astNodesA?: string[];
     astNodesB?: string[];
+    segments?: EvidenceSegment[];
   };
 
   @CreateDateColumn()

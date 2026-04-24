@@ -14,8 +14,6 @@ import {
   SubmissionStatus,
 } from './entities/submission.entity';
 import { Repository } from 'typeorm';
-import { parse } from '@babel/parser';
-import traverse from '@babel/traverse';
 import { Assignment } from 'src/assignments/entities/assignment.entity';
 import { AssignmentTestCase } from 'src/assignments/entities/assignment-test-case.entity';
 import { CourseMember } from 'src/courses/entities/course-member.entity';
@@ -23,7 +21,8 @@ import {
   SubmitVersion,
   SubmitVersionStatus,
 } from 'src/submit-versions/entities/submit-version.entity';
-import { Plagiarism } from 'src/plagiarisms/entities/plagiarism.entity';
+import { Plagiarism, EvidenceSegment } from 'src/plagiarisms/entities/plagiarism.entity';
+import { PlagiarismExtractor } from 'src/common/utils/plagiarism-extractor.util';
 import { User, UserRole } from 'src/users/entities/user.entity';
 import { SubmissionTestResult } from './entities/submission-test-result.entity';
 import { spawn } from 'child_process';
@@ -50,7 +49,7 @@ export class SubmissionsService {
     private readonly usersRepository: Repository<User>,
     @InjectRepository(SubmissionTestResult)
     private readonly submissionTestResultsRepository: Repository<SubmissionTestResult>,
-  ) {}
+  ) { }
 
   async submit(
     studentId: string,
@@ -327,9 +326,9 @@ export class SubmissionsService {
       submissionId,
       student: submission.student
         ? {
-            id: submission.student.id,
-            username: submission.student.username,
-          }
+          id: submission.student.id,
+          username: submission.student.username,
+        }
         : null,
       highestSimilarity: submission.highestSimilarity ?? 0,
       highRiskCount: matches.filter((item) => item.highRisk).length,
@@ -389,37 +388,37 @@ export class SubmissionsService {
       id: submission.id,
       student: submission.student
         ? {
-            id: submission.student.id,
-            username: submission.student.username,
-            role: submission.student.role,
-          }
+          id: submission.student.id,
+          username: submission.student.username,
+          role: submission.student.role,
+        }
         : null,
       assignment: submission.assignment
         ? {
-            id: submission.assignment.id,
-            title: submission.assignment.title,
-            description: submission.assignment.description,
-            document: submission.assignment.document,
-            deadline: submission.assignment.deadline,
-            maxScore: submission.assignment.maxScore,
-            evaluationCriteria: submission.assignment.evaluationCriteria,
-            allowLateSubmission: submission.assignment.allowLateSubmission,
-            status: submission.assignment.status,
-            chapter: submission.assignment.chapter
-              ? {
-                  id: submission.assignment.chapter.id,
-                  title: submission.assignment.chapter.title,
-                  course: submission.assignment.chapter.course
-                    ? {
-                        id: submission.assignment.chapter.course.id,
-                        name: submission.assignment.chapter.course.name,
-                      }
-                    : null,
+          id: submission.assignment.id,
+          title: submission.assignment.title,
+          description: submission.assignment.description,
+          document: submission.assignment.document,
+          deadline: submission.assignment.deadline,
+          maxScore: submission.assignment.maxScore,
+          evaluationCriteria: submission.assignment.evaluationCriteria,
+          allowLateSubmission: submission.assignment.allowLateSubmission,
+          status: submission.assignment.status,
+          chapter: submission.assignment.chapter
+            ? {
+              id: submission.assignment.chapter.id,
+              title: submission.assignment.chapter.title,
+              course: submission.assignment.chapter.course
+                ? {
+                  id: submission.assignment.chapter.course.id,
+                  name: submission.assignment.chapter.course.name,
                 }
-              : null,
-            created_at: submission.assignment.created_at,
-            updated_at: submission.assignment.updated_at,
-          }
+                : null,
+            }
+            : null,
+          created_at: submission.assignment.created_at,
+          updated_at: submission.assignment.updated_at,
+        }
         : null,
       code: submission.code,
       file: submission.file,
@@ -559,7 +558,7 @@ export class SubmissionsService {
           submitVersionB: other,
           similarity,
           highRisk: similarity >= this.highRiskThreshold,
-          evidence: this.extractPlagiarismEvidence(
+          evidence: PlagiarismExtractor.extractPlagiarismEvidence(
             version.codeSnapshot ?? '',
             other.codeSnapshot ?? '',
           ),
@@ -636,8 +635,8 @@ process.stdin.on('end', async () => {
   }
 
   private computeSimilarity(a: string, b: string): number {
-    const astA = this.extractAstFeatures(a);
-    const astB = this.extractAstFeatures(b);
+    const astA = PlagiarismExtractor.extractAstFeatures(a);
+    const astB = PlagiarismExtractor.extractAstFeatures(b);
     const tokensA = new Set([...this.normalizeCode(a), ...astA.identifiers, ...astA.nodeTypes]);
     const tokensB = new Set([...this.normalizeCode(b), ...astB.identifiers, ...astB.nodeTypes]);
 
@@ -668,63 +667,6 @@ process.stdin.on('end', async () => {
       .filter((token) => token.length > 1);
   }
 
-  private extractPlagiarismEvidence(codeA: string, codeB: string) {
-    const astA = this.extractAstFeatures(codeA);
-    const astB = this.extractAstFeatures(codeB);
-    const tokensA = [...this.normalizeCode(codeA), ...astA.identifiers];
-    const tokensB = [...this.normalizeCode(codeB), ...astB.identifiers];
-    const commonTokenSet = new Set(tokensA.filter((token) => tokensB.includes(token)));
-    const commonTokens = [...commonTokenSet].slice(0, 15);
-
-    const lineSetB = new Set(astB.lines);
-    const commonLines = astA.lines.filter((line) => lineSetB.has(line)).slice(0, 5);
-
-    return {
-      commonTokens,
-      commonLines,
-      astNodesA: astA.nodeTypes.slice(0, 15),
-      astNodesB: astB.nodeTypes.slice(0, 15),
-    };
-  }
-
-  private extractAstFeatures(code: string) {
-    try {
-      const ast = parse(code, {
-        sourceType: 'unambiguous',
-        plugins: ['typescript'],
-        errorRecovery: true,
-      });
-      const identifiers = new Set<string>();
-      const nodeTypes = new Set<string>();
-      const lines: string[] = [];
-      const sourceLines = code.split('\n');
-
-      traverse(ast, {
-        enter(path) {
-          nodeTypes.add(path.node.type);
-          if ('name' in path.node && typeof path.node.name === 'string') {
-            identifiers.add(path.node.name);
-          }
-          const startLine = path.node.loc?.start.line;
-          if (startLine && sourceLines[startLine - 1]) {
-            lines.push(sourceLines[startLine - 1].trim());
-          }
-        },
-      });
-
-      return {
-        identifiers: [...identifiers],
-        nodeTypes: [...nodeTypes],
-        lines: lines.filter((line) => line.length > 5),
-      };
-    } catch {
-      return {
-        identifiers: [],
-        nodeTypes: [],
-        lines: [],
-      };
-    }
-  }
 
   private normalizeOutput(value: string | undefined) {
     return (value ?? '').trim().replace(/\r\n/g, '\n');
@@ -753,15 +695,15 @@ process.stdin.on('end', async () => {
         executionTimeMs: result.executionTimeMs,
         testCase: result.testCase
           ? {
-              id: result.testCase.id,
-              input: result.testCase.input,
-              expectedOutput: result.testCase.isSample
-                ? result.testCase.expectedOutput
-                : undefined,
-              isSample: result.testCase.isSample,
-              weight: result.testCase.weight,
-              orderIndex: result.testCase.orderIndex,
-            }
+            id: result.testCase.id,
+            input: result.testCase.input,
+            expectedOutput: result.testCase.isSample
+              ? result.testCase.expectedOutput
+              : undefined,
+            isSample: result.testCase.isSample,
+            weight: result.testCase.weight,
+            orderIndex: result.testCase.orderIndex,
+          }
           : null,
       }));
   }

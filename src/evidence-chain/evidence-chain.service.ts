@@ -4,6 +4,7 @@ import { Plagiarism } from 'src/plagiarisms/entities/plagiarism.entity';
 import { Submission } from 'src/submissions/entities/submission.entity';
 import { UserRole } from 'src/users/entities/user.entity';
 import { Repository } from 'typeorm';
+import { PlagiarismExtractor } from 'src/common/utils/plagiarism-extractor.util';
 
 @Injectable()
 export class EvidenceChainService {
@@ -12,7 +13,7 @@ export class EvidenceChainService {
     private readonly submissionsRepository: Repository<Submission>,
     @InjectRepository(Plagiarism)
     private readonly plagiarismsRepository: Repository<Plagiarism>,
-  ) {}
+  ) { }
 
   async getEvidenceChain(submissionId: string, requesterId: string, role: UserRole) {
     const submission = await this.submissionsRepository.findOne({
@@ -50,20 +51,34 @@ export class EvidenceChainService {
     return {
       submissionId,
       generatedAt: new Date().toISOString(),
-      chain: matches.map((match) => ({
-        plagiarismId: match.id,
-        similarity: match.similarity,
-        highRisk: match.highRisk,
-        evidence: match.evidence ?? { commonTokens: [], commonLines: [] },
-        pair: {
-          submissionAId: match.submitVersionA?.submission?.id,
-          studentA: match.submitVersionA?.submission?.student?.username,
-          submittedAtA: match.submitVersionA?.submittedAt,
-          submissionBId: match.submitVersionB?.submission?.id,
-          studentB: match.submitVersionB?.submission?.student?.username,
-          submittedAtB: match.submitVersionB?.submittedAt,
-        },
-      })),
+      chain: matches.map((match) => {
+        const codeA = match.submitVersionA?.codeSnapshot ?? '';
+        const codeB = match.submitVersionB?.codeSnapshot ?? '';
+        return {
+          plagiarismId: match.id,
+          similarity: match.similarity,
+          highRisk: match.highRisk,
+          evidence: {
+            commonTokens: match.evidence?.commonTokens ?? [],
+            commonLines: match.evidence?.commonLines ?? [],
+            astNodesA: match.evidence?.astNodesA ?? [],
+            astNodesB: match.evidence?.astNodesB ?? [],
+            segments: match.evidence?.segments?.length
+              ? match.evidence.segments
+              : PlagiarismExtractor.extractPlagiarismEvidence(codeA, codeB).segments,
+          },
+          pair: {
+            submissionAId: match.submitVersionA?.submission?.id,
+            studentA: match.submitVersionA?.submission?.student?.username,
+            codeA: codeA,
+            submittedAtA: match.submitVersionA?.submittedAt,
+            submissionBId: match.submitVersionB?.submission?.id,
+            studentB: match.submitVersionB?.submission?.student?.username,
+            codeB: codeB,
+            submittedAtB: match.submitVersionB?.submittedAt,
+          },
+        };
+      }),
     };
   }
 }
