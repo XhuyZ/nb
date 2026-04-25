@@ -297,7 +297,7 @@ export class SubmissionsService {
     }
 
     const versions = await this.submitVersionsRepository.find({
-      where: { submission: { id: submissionId } },
+      where: { submission: { id: submissionId }, status: SubmitVersionStatus.ACTIVE },
     });
     if (versions.length === 0) {
       return [];
@@ -543,12 +543,14 @@ export class SubmissionsService {
         item.submission?.student?.id !== submission.student?.id,
     );
 
-    let highestSimilarity = submission.highestSimilarity ?? 0;
+    let highestSimilarity = 0;
+
     for (const other of sameAssignmentOtherVersions) {
       const similarity = this.computeSimilarity(
         version.codeSnapshot ?? '',
         other.codeSnapshot ?? '',
       );
+
       if (similarity <= 0) {
         continue;
       }
