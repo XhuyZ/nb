@@ -53,11 +53,32 @@ type PdfPayload = {
   generatedBy: string;
   generatedAt: string;
   courseName: string;
+  instructorName: string;
+  extractionDate: string;
   overview: Awaited<ReturnType<StatisticsReportingService['getOverview']>>;
-  trend: Awaited<ReturnType<StatisticsReportingService['buildSubmissionTrendData']>>;
-  verdictSummary: Awaited<ReturnType<StatisticsReportingService['getVerdictSummary']>>;
+  performance: {
+    totalStudents: number;
+    totalValidSubmissions: number;
+    averageScore: number;
+    rates: { excellent: number; pass: number; fail: number };
+  };
+  integrity: {
+    flaggedCount: number;
+    avgSimilarity: number;
+    confirmedCases: number;
+    warningCases: number;
+    dismissedCases: number;
+    hotspotAssignment?: string;
+    hotspotCount?: number;
+  };
   assignments: AssignmentReportRow[];
-  recommendations: string[];
+  violationList: Array<{
+    studentId: string;
+    fullName: string;
+    similarity: number;
+    source: string;
+    penalty: string;
+  }>;
 };
 
 @Injectable()
@@ -79,7 +100,7 @@ export class StatisticsReportingService {
     private readonly reportsRepository: Repository<AcademicReport>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
-  ) {}
+  ) { }
 
   async getOverview(courseId?: string) {
     const submissions = await this.getSubmissions(courseId);
@@ -195,9 +216,9 @@ export class StatisticsReportingService {
       metadata: {
         scopeLabel: payload.scopeLabel,
         overview: payload.overview,
-        trend: payload.trend,
-        verdictSummary: payload.verdictSummary,
-        topAssignments: payload.assignments.slice(0, 5),
+        performance: payload.performance,
+        integrity: payload.integrity,
+        assignments: payload.assignments.slice(0, 5),
       },
     });
     const saved = await this.reportsRepository.save(report);
@@ -205,10 +226,10 @@ export class StatisticsReportingService {
       id: saved.id,
       generatedBy: uploader
         ? {
-            id: uploader.id,
-            username: uploader.username,
-            role: uploader.role,
-          }
+          id: uploader.id,
+          username: uploader.username,
+          role: uploader.role,
+        }
         : null,
       type: saved.type,
       courseId: saved.courseId,
@@ -228,75 +249,110 @@ export class StatisticsReportingService {
     const overview = await this.getOverview(courseId);
     const course = courseId
       ? await this.coursesRepository.findOne({
-          where: { id: courseId },
-          relations: { teacher: true },
-        })
+        where: { id: courseId },
+        relations: { teacher: true, members: true },
+      })
       : null;
 
     if (courseId && !course) {
       throw new NotFoundException('Course not found');
     }
 
-    const trend = await this.buildSubmissionTrendData(30, courseId);
-    const verdictSummary = await this.getVerdictSummary(courseId);
     const assignments = await this.getAssignmentBreakdown(courseId);
-    const recommendations = this.buildRecommendations(overview, trend, verdictSummary, assignments);
+    const verdictSummary = await this.getVerdictSummary(courseId);
+    const submissions = await this.getSubmissions(courseId);
+
+    // Performance Metrics
+    const scores = submissions.map(s => s.score).filter(s => s !== null && s !== undefined) as number[];
+    const excellent = scores.filter(s => s >= 80).length;
+    const pass = scores.filter(s => s >= 50 && s < 80).length;
+    const fail = scores.filter(s => s < 50).length;
+    const totalWithScores = scores.length || 1;
+
+    // Integrity Metrics
+    const plagiarisms = await this.getPlagiarisms(courseId);
+    const totalSim = plagiarisms.reduce((acc, p) => acc + p.similarity, 0);
+
+    let hotspotAssignment: string | undefined;
+    let hotspotCount = 0;
+    assignments.forEach(a => {
+      if (a.flaggedCount > hotspotCount) {
+        hotspotCount = a.flaggedCount;
+        hotspotAssignment = a.assignmentTitle;
+      }
+    });
+
+    const violationList = verdictSummary.queue.map(q => ({
+      studentId: q.studentId ?? 'N/A',
+      fullName: q.student,
+      similarity: q.similarity,
+      source: 'Internal Match',
+      penalty: q.verdict === 'Confirmed copy' ? 'Score Cancelled' : 'Under Review'
+    }));
 
     return {
       reportTitle: this.resolveReportTitle(type),
       reportTypeLabel: this.formatReportType(type),
       scopeLabel: course
         ? `${course.name} (Teacher: ${course.teacher?.username ?? 'N/A'})`
-        : 'All courses',
+        : 'All Courses',
       generatedBy,
       generatedAt: new Date().toISOString(),
-      courseName: course?.name ?? 'All courses',
+      courseName: course?.name ?? 'All Courses',
+      instructorName: course?.teacher?.username ?? 'System Admin',
+      extractionDate: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       overview,
-      trend,
-      verdictSummary,
+      performance: {
+        totalStudents: course?.members?.length ?? 0,
+        totalValidSubmissions: submissions.length,
+        averageScore: scores.length ? Number((scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)) : 0,
+        rates: {
+          excellent: Math.round((excellent / totalWithScores) * 100),
+          pass: Math.round((pass / totalWithScores) * 100),
+          fail: Math.round((fail / totalWithScores) * 100)
+        }
+      },
+      integrity: {
+        flaggedCount: overview.suspiciousRate > 0 ? Math.round(overview.totalSubmissions * (overview.suspiciousRate / 100)) : 0,
+        avgSimilarity: plagiarisms.length ? Number(((totalSim / plagiarisms.length) * 100).toFixed(1)) : 0,
+        confirmedCases: verdictSummary.confirmedCopyCount,
+        warningCases: verdictSummary.needMoreReviewCount,
+        dismissedCases: verdictSummary.validCount,
+        hotspotAssignment,
+        hotspotCount
+      },
       assignments,
-      recommendations,
+      violationList
     };
   }
 
   private async generatePdf(filePath: string, payload: PdfPayload) {
     await new Promise<void>((resolve, reject) => {
-      const doc = new PDFDocument({ margin: 40 });
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
       const stream = doc.pipe(createWriteStream(filePath));
-      const cards: PdfMetricCard[] = [
-        {
-          label: 'Total Assignments',
-          value: String(payload.overview.totalAssignments),
-          hint: `${payload.overview.totalCourses} course scope`,
-        },
-        {
-          label: 'Total Submissions',
-          value: String(payload.overview.totalSubmissions),
-          hint: `${payload.trend.summary.totalSubmissions} versions in last 30 days`,
-        },
-        {
-          label: 'Suspicious Rate',
-          value: `${payload.overview.suspiciousRate}%`,
-          hint: `${payload.verdictSummary.highRiskCount} high-risk cases`,
-        },
-        {
-          label: 'Pending Reviews',
-          value: String(payload.verdictSummary.pendingReviewCount),
-          hint: `${payload.verdictSummary.reviewedCount} reviewed cases`,
-        },
-      ];
 
-      this.drawHeader(doc, payload);
-      this.drawMetricCards(doc, cards);
-      this.drawOverviewSection(doc, payload);
-      this.drawTrendSection(doc, payload.trend.points, payload.trend.summary.peakDate);
-      this.drawRiskSection(doc, payload);
-      this.drawAssignmentSection(doc, payload.assignments);
-      this.drawReviewQueueSection(doc, payload.verdictSummary.queue);
-      this.drawRecommendationsSection(doc, payload.recommendations);
+      // 1. Header
+      this.drawModernHeader(doc, payload);
+
+      // 2. General Information
+      this.drawGeneralInfo(doc, payload);
+
+      // 3. Academic Performance Overview
+      this.drawPerformanceSection(doc, payload);
+
+      // 4. Academic Integrity Report
+      this.drawIntegritySection(doc, payload);
+
+      // 5. Detailed Analysis
+      this.drawAssignmentTableExtended(doc, payload.assignments);
+
+      // 6. Appendix
+      this.drawViolationAppendix(doc, payload.violationList);
+
+      // 7. Footer / Signature
+      this.drawSignature(doc, payload);
 
       doc.end();
-
       stream.on('finish', () => resolve());
       stream.on('error', (error) => reject(error));
     });
@@ -465,9 +521,9 @@ export class StatisticsReportingService {
     const submissionIds = highRiskSubmissions.map((submission) => submission.id);
     const reviews = submissionIds.length
       ? await this.reviewsRepository.find({
-          where: submissionIds.map((id) => ({ submission: { id } })),
-          relations: { submission: true },
-        })
+        where: submissionIds.map((id) => ({ submission: { id } })),
+        relations: { submission: true },
+      })
       : [];
 
     const reviewMap = new Map(reviews.map((review) => [review.submission.id, review]));
@@ -487,9 +543,10 @@ export class StatisticsReportingService {
       }
     });
 
-    const queue: ReviewQueueRow[] = highRiskSubmissions.slice(0, 5).map((submission) => {
+    const queue: Array<ReviewQueueRow & { studentId?: string }> = highRiskSubmissions.slice(0, 5).map((submission) => {
       const review = reviewMap.get(submission.id);
       return {
+        studentId: submission.student?.id,
         student: submission.student?.username ?? 'Unknown student',
         assignment: submission.assignment?.title ?? 'Unknown assignment',
         similarity: Number(((submission.highestSimilarity ?? 0) * 100).toFixed(1)),
@@ -603,208 +660,138 @@ export class StatisticsReportingService {
     }
   }
 
-  private drawHeader(doc: PDFKit.PDFDocument, payload: PdfPayload) {
-    doc
-      .roundedRect(40, 40, doc.page.width - 80, 92, 10)
-      .fillAndStroke('#EFF6FF', '#BFDBFE');
-    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(22).text(payload.reportTitle, 56, 58);
-    doc
-      .font('Helvetica')
-      .fontSize(10)
-      .fillColor('#334155')
-      .text(`Report type: ${payload.reportTypeLabel}`, 56, 90)
-      .text(`Scope: ${payload.scopeLabel}`, 56, 106)
-      .text(`Generated by: ${payload.generatedBy}`, 340, 90)
-      .text(`Generated at: ${payload.generatedAt.slice(0, 19).replace('T', ' ')}`, 340, 106);
-    doc.moveTo(40, 145).strokeColor('#E2E8F0').lineTo(doc.page.width - 40, 145).stroke();
-    doc.y = 160;
+  private drawModernHeader(doc: PDFKit.PDFDocument, payload: PdfPayload) {
+    doc.fillColor('#111827').font('Helvetica-Bold').fontSize(22).text('QUALITY & ACADEMIC INTEGRITY', 40, 50, { align: 'center' });
+    doc.fontSize(18).text('EVALUATION REPORT', 40, 75, { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#4B5563').text('Course Management & Automated Grading System', 40, 100, { align: 'center' });
+    doc.moveTo(40, 120).lineTo(doc.page.width - 40, 120).strokeColor('#111827').lineWidth(1.5).stroke();
+    doc.y = 140;
   }
 
-  private drawMetricCards(doc: PDFKit.PDFDocument, cards: PdfMetricCard[]) {
-    const startX = 40;
-    const gap = 16;
-    const cardWidth = (doc.page.width - 80 - gap) / 2;
-    const cardHeight = 66;
+  private drawGeneralInfo(doc: PDFKit.PDFDocument, payload: PdfPayload) {
+    this.drawSectionTitleConcept(doc, '1. General Information');
+    const startX = 60;
+    const labelWidth = 140;
 
-    cards.forEach((card, index) => {
-      const column = index % 2;
-      const row = Math.floor(index / 2);
-      const x = startX + column * (cardWidth + gap);
-      const y = doc.y + row * (cardHeight + 12);
-
-      doc.roundedRect(x, y, cardWidth, cardHeight, 8).fillAndStroke('#FFFFFF', '#CBD5E1');
-      doc.fillColor('#64748B').font('Helvetica').fontSize(9).text(card.label, x + 14, y + 12);
-      doc
-        .fillColor('#0F172A')
-        .font('Helvetica-Bold')
-        .fontSize(18)
-        .text(card.value, x + 14, y + 28);
-      doc.fillColor('#475569').font('Helvetica').fontSize(9).text(card.hint, x + 14, y + 48);
-    });
-
-    doc.y += Math.ceil(cards.length / 2) * (cardHeight + 12) + 8;
-  }
-
-  private drawOverviewSection(doc: PDFKit.PDFDocument, payload: PdfPayload) {
-    this.ensurePageSpace(doc, 120);
-    this.drawSectionTitle(doc, 'Executive Summary');
-
-    const completion = payload.overview.submissionCompletion;
-    const summaryLines = [
-      `The selected scope covers ${payload.overview.totalAssignments} assignment(s) across ${payload.overview.totalCourses} course(s).`,
-      `${payload.overview.totalSubmissions} submission record(s) are currently stored, with ${completion.completionRate}% completion against the assignment baseline.`,
-      `${payload.verdictSummary.highRiskCount} high-risk submission(s) were detected, and ${payload.verdictSummary.reviewedCount} of them already have a review verdict.`,
+    const fields = [
+      { label: 'Course:', value: payload.courseName },
+      { label: 'Instructor in Charge:', value: payload.instructorName },
+      { label: 'Reporting Period:', value: 'Semester 1, Academic Year 2025 - 2026' },
+      { label: 'Extraction Date:', value: payload.extractionDate },
+      { label: 'Report Objective:', value: 'Final term evaluation and review of examination rule violations.' }
     ];
 
-    summaryLines.forEach((line) => {
-      doc.circle(46, doc.y + 5, 2).fill('#2563EB');
-      doc.fillColor('#1E293B').font('Helvetica').fontSize(10).text(line, 56, doc.y);
-      doc.moveDown(0.6);
+    fields.forEach(f => {
+      doc.font('Helvetica-Bold').fontSize(9).fillColor('#374151').text(f.label, startX, doc.y, { width: labelWidth });
+      const valY = doc.y - 12;
+      doc.font('Helvetica').text(f.value, startX + labelWidth, valY, { width: doc.page.width - startX - labelWidth - 40 });
+      doc.moveDown(0.2);
     });
+    doc.moveDown(0.8);
+  }
+
+  private drawPerformanceSection(doc: PDFKit.PDFDocument, payload: PdfPayload) {
+    this.drawSectionTitleConcept(doc, '2. Academic Performance Overview');
+    const startX = 60;
+    const perf = payload.performance;
+
+    const listItems = [
+      { label: 'Total Enrolled Students:', value: `${perf.totalStudents} students` },
+      { label: 'Total Assignments:', value: `${payload.overview.totalAssignments} assignments` },
+      { label: 'Total Valid Submissions:', value: `${perf.totalValidSubmissions} submissions` },
+      { label: 'Overall Average Score:', value: `${perf.averageScore} / 100`, isBold: true },
+    ];
+
+    listItems.forEach(item => {
+      doc.circle(startX - 10, doc.y + 5, 2).fill('#374151');
+      doc.font('Helvetica-Bold').fontSize(9).text(item.label, startX, doc.y - 5);
+      doc.font(item.isBold ? 'Helvetica-Bold' : 'Helvetica').text(item.value, startX + 150, doc.y - 9);
+      doc.moveDown(0.5);
+    });
+
+    doc.font('Helvetica-Bold').text('Pass / Fail Rate:', startX, doc.y);
+    doc.moveDown(0.3);
+    doc.font('Helvetica').fillColor('#4B5563');
+    doc.text(`- Excellent (>= 80 pts): ${perf.rates.excellent}%`, startX + 20, doc.y);
+    doc.text(`- Pass (50 pts - 79 pts): ${perf.rates.pass}%`, startX + 20, doc.y + 12);
+    doc.text(`- Fail (< 50 pts): ${perf.rates.fail}%`, startX + 20, doc.y + 24);
+    doc.y += 40;
+  }
+
+  private drawIntegritySection(doc: PDFKit.PDFDocument, payload: PdfPayload) {
+    this.drawSectionTitleConcept(doc, '3. Academic Integrity Report');
+    const startX = 60;
+    const integ = payload.integrity;
+
+    doc.circle(startX - 10, doc.y + 5, 2).fill('#EF4444');
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#EF4444').text('Total Flagged Submissions (High-Risk):', startX, doc.y - 5);
+    doc.text(`${integ.flaggedCount} submissions`, startX + 200, doc.y - 9);
     doc.moveDown(0.5);
+
+    doc.circle(startX - 10, doc.y + 5, 2).fill('#374151');
+    doc.font('Helvetica-Bold').fillColor('#374151').text('Average Source Code Similarity Rate:', startX, doc.y - 5);
+    doc.font('Helvetica').text(`${integ.avgSimilarity}% (Safe Level)`, startX + 200, doc.y - 9);
+    doc.moveDown(0.5);
+
+    doc.circle(startX - 10, doc.y + 5, 2).fill('#374151');
+    doc.font('Helvetica-Bold').text('Disciplinary Action Statistics:', startX, doc.y - 5);
+    doc.moveDown(0.3);
+    doc.font('Helvetica').fillColor('#4B5563');
+    doc.text(`RED Confirmed Plagiarism: ${integ.confirmedCases} cases`, startX + 20, doc.y);
+    doc.text(`YELLOW Warning / Reminder: ${integ.warningCases} cases`, startX + 20, doc.y + 12);
+    doc.text(`GREEN Dismissed: ${integ.dismissedCases} cases`, startX + 20, doc.y + 24);
+    doc.y += 40;
+
+    if (integ.hotspotAssignment) {
+      doc.roundedRect(startX, doc.y - 10, 480, 45, 4).fillAndStroke('#F9FAFB', '#E5E7EB');
+      doc.fillColor('#111827').font('Helvetica-Bold').text('HOTSPOT:', startX + 10, doc.y);
+      doc.font('Helvetica-Oblique').text(`The assignment with the highest violation rate is ${integ.hotspotAssignment} with ${integ.hotspotCount} flagged cases.`, startX + 80, doc.y, { width: 380 });
+      doc.y += 60;
+    }
   }
 
-  private drawTrendSection(doc: PDFKit.PDFDocument, points: TrendPoint[], peakDate: string) {
-    this.ensurePageSpace(doc, 220);
-    this.drawSectionTitle(doc, 'Submission Trend Snapshot');
-
-    const chartPoints = points.slice(-14);
-    const chartX = 48;
-    const chartY = doc.y + 8;
-    const chartWidth = doc.page.width - 96;
-    const chartHeight = 120;
-    const maxValue = Math.max(...chartPoints.map((point) => point.submissionCount), 1);
-    const barGap = 6;
-    const barWidth = (chartWidth - barGap * (chartPoints.length - 1)) / Math.max(chartPoints.length, 1);
-
-    doc.rect(chartX, chartY, chartWidth, chartHeight).strokeColor('#CBD5E1').stroke();
-
-    chartPoints.forEach((point, index) => {
-      const barHeight = (point.submissionCount / maxValue) * (chartHeight - 24);
-      const x = chartX + index * (barWidth + barGap);
-      const y = chartY + chartHeight - barHeight - 16;
-
-      doc.rect(x, y, Math.max(barWidth, 2), barHeight).fill('#60A5FA');
-      doc
-        .fillColor('#475569')
-        .font('Helvetica')
-        .fontSize(7)
-        .text(point.date.slice(5), x, chartY + chartHeight - 12, {
-          width: Math.max(barWidth, 12),
-          align: 'center',
-        });
-    });
-
-    doc.y = chartY + chartHeight + 10;
-    doc
-      .fillColor('#334155')
-      .font('Helvetica')
-      .fontSize(10)
-      .text(
-        `Peak activity was recorded on ${peakDate}. The chart above shows the last ${chartPoints.length} day(s) of submission version activity.`,
-      );
-    doc.moveDown();
-  }
-
-  private drawRiskSection(doc: PDFKit.PDFDocument, payload: PdfPayload) {
-    this.ensurePageSpace(doc, 170);
-    this.drawSectionTitle(doc, 'Risk and Verdict Summary');
-
-    const distribution = payload.overview.plagiarismDistribution as Array<{
-      label: string;
-      value: number;
-    }>;
-
-    const leftX = 40;
-    const rightX = doc.page.width / 2 + 8;
-    const boxWidth = doc.page.width / 2 - 48;
-    const startY = doc.y;
-
-    doc.roundedRect(leftX, startY, boxWidth, 110, 8).fillAndStroke('#FFFFFF', '#CBD5E1');
-    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(11).text('Similarity Distribution', leftX + 14, startY + 12);
-    distribution.forEach((item, index) => {
-      doc
-        .fillColor('#334155')
-        .font('Helvetica')
-        .fontSize(10)
-        .text(`${item.label}: ${item.value}`, leftX + 14, startY + 38 + index * 20);
-    });
-
-    doc.roundedRect(rightX, startY, boxWidth, 110, 8).fillAndStroke('#FFFFFF', '#CBD5E1');
-    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(11).text('Verdict Overview', rightX + 14, startY + 12);
-    const verdictLines = [
-      `Confirmed copy: ${payload.verdictSummary.confirmedCopyCount}`,
-      `Need more review: ${payload.verdictSummary.needMoreReviewCount}`,
-      `Valid after review: ${payload.verdictSummary.validCount}`,
-      `Pending review: ${payload.verdictSummary.pendingReviewCount}`,
-    ];
-    verdictLines.forEach((line, index) => {
-      doc.fillColor('#334155').font('Helvetica').fontSize(10).text(line, rightX + 14, startY + 38 + index * 18);
-    });
-
-    doc.y = startY + 126;
-  }
-
-  private drawAssignmentSection(doc: PDFKit.PDFDocument, assignments: AssignmentReportRow[]) {
-    this.ensurePageSpace(doc, 180);
-    this.drawSectionTitle(doc, 'Assignment Breakdown');
-
-    const rows = assignments.map((assignment) => [
-      assignment.assignmentTitle,
-      String(assignment.submissionCount),
-      String(assignment.uniqueStudents),
-      assignment.averageScore.toFixed(1),
-      String(assignment.flaggedCount),
-      assignment.deadline,
+  private drawAssignmentTableExtended(doc: PDFKit.PDFDocument, assignments: AssignmentReportRow[]) {
+    this.drawSectionTitleConcept(doc, '4. Detailed Analysis by Assignment');
+    const rows = assignments.map((a, i) => [
+      `A${i + 1}`,
+      a.assignmentTitle,
+      `${Math.round((a.submissionCount / (a.uniqueStudents || 1)) * 100)}%`,
+      String(a.averageScore),
+      a.flaggedCount > 0 ? `${a.flaggedCount} Cases` : '0'
     ]);
 
-    this.drawTable(
-      doc,
-      ['Assignment', 'Subs', 'Students', 'Avg score', 'Flags', 'Deadline'],
-      [170, 48, 58, 58, 44, 72],
-      rows,
-    );
+    this.drawTable(doc, ['ID', 'Assignment Name', 'Rate', 'Avg Score', 'Violations'], [40, 200, 60, 60, 100], rows);
   }
 
-  private drawReviewQueueSection(doc: PDFKit.PDFDocument, queue: ReviewQueueRow[]) {
-    this.ensurePageSpace(doc, 170);
-    this.drawSectionTitle(doc, 'High-Risk Review Queue');
+  private drawViolationAppendix(doc: PDFKit.PDFDocument, violations: PdfPayload['violationList']) {
+    this.ensurePageSpace(doc, 200);
+    this.drawSectionTitleConcept(doc, '5. Appendix: Violation List');
+    const rows = violations.length ? violations.map(v => [
+      v.studentId,
+      v.fullName,
+      `${v.similarity}%`,
+      v.source,
+      v.penalty
+    ]) : [['-', 'No confirmed violations', '-', '-', '-']];
 
-    const rows = queue.length
-      ? queue.map((item) => [
-          item.student,
-          item.assignment,
-          `${item.similarity}%`,
-          item.verdict,
-          item.reviewedAt,
-        ])
-      : [['No high-risk submissions', '-', '-', '-', '-']];
-
-    this.drawTable(
-      doc,
-      ['Student', 'Assignment', 'Similarity', 'Verdict', 'Reviewed at'],
-      [82, 172, 62, 96, 70],
-      rows,
-    );
+    this.drawTable(doc, ['Student ID', 'Full Name', 'Sim', 'Source', 'Penalty'], [70, 120, 40, 120, 130], rows);
   }
 
-  private drawRecommendationsSection(doc: PDFKit.PDFDocument, recommendations: string[]) {
-    this.ensurePageSpace(doc, 140);
-    this.drawSectionTitle(doc, 'Recommended Actions');
-
-    recommendations.forEach((item) => {
-      doc.circle(46, doc.y + 5, 2).fill('#2563EB');
-      doc.fillColor('#1E293B').font('Helvetica').fontSize(10).text(item, 56, doc.y, {
-        width: doc.page.width - 100,
-      });
-      doc.moveDown(0.7);
-    });
+  private drawSignature(doc: PDFKit.PDFDocument, payload: PdfPayload) {
+    this.ensurePageSpace(doc, 150);
+    doc.y += 40;
+    const rightX = doc.page.width - 250;
+    doc.fillColor('#374151').font('Helvetica-Oblique').fontSize(9).text(payload.extractionDate, rightX, doc.y, { align: 'center', width: 200 });
+    doc.font('Helvetica-Bold').fontSize(10).text('Instructor in Charge', rightX, doc.y + 20, { align: 'center', width: 200 });
+    doc.moveDown(5);
+    doc.font('Helvetica').text(payload.instructorName, rightX, doc.y, { align: 'center', width: 200 });
   }
 
-  private drawSectionTitle(doc: PDFKit.PDFDocument, title: string) {
-    doc.fillColor('#0F172A').font('Helvetica-Bold').fontSize(13).text(title);
-    doc.moveTo(40, doc.y + 4).strokeColor('#E2E8F0').lineTo(doc.page.width - 40, doc.y + 4).stroke();
-    doc.moveDown(0.6);
+  private drawSectionTitleConcept(doc: PDFKit.PDFDocument, title: string) {
+    this.ensurePageSpace(doc, 50);
+    doc.rect(40, doc.y, 4, 18).fill('#2563EB');
+    doc.fillColor('#1F2937').font('Helvetica-Bold').fontSize(12).text(title, 50, doc.y + 3);
+    doc.y += 20;
   }
 
   private drawTable(
@@ -814,23 +801,23 @@ export class StatisticsReportingService {
     rows: string[][],
   ) {
     const startX = 40;
-    const rowHeight = 22;
+    const rowHeight = 25;
     const drawHeader = () => {
       let x = startX;
-      doc.fillColor('#F8FAFC').rect(startX, doc.y, widths.reduce((sum, width) => sum + width, 0), rowHeight).fill();
+      doc.fillColor('#F9FAFB').rect(startX, doc.y, widths.reduce((sum, width) => sum + width, 0), rowHeight).fill();
       headers.forEach((header, index) => {
         doc
-          .fillColor('#0F172A')
+          .fillColor('#374151')
           .font('Helvetica-Bold')
           .fontSize(9)
-          .text(header, x + 6, doc.y + 7, { width: widths[index] - 12 });
+          .text(header, x + 6, doc.y + 8, { width: widths[index] - 12 });
         x += widths[index];
       });
       doc.y += rowHeight;
     };
 
     drawHeader();
-
+    doc.font('Helvetica').fontSize(8).fillColor('#374151');
     rows.forEach((row) => {
       if (doc.y + rowHeight > doc.page.height - 45) {
         doc.addPage();
@@ -838,19 +825,13 @@ export class StatisticsReportingService {
       }
 
       let x = startX;
-      doc.strokeColor('#E2E8F0');
       widths.forEach((width, index) => {
-        doc.rect(x, doc.y, width, rowHeight).stroke();
-        doc
-          .fillColor('#334155')
-          .font('Helvetica')
-          .fontSize(8)
-          .text(row[index] ?? '', x + 6, doc.y + 7, { width: width - 12, ellipsis: true });
+        doc.rect(x, doc.y, width, rowHeight).strokeColor('#E5E7EB').lineWidth(0.5).stroke();
+        doc.text(row[index] ?? '', x + 6, doc.y + 8, { width: width - 12, ellipsis: true });
         x += width;
       });
       doc.y += rowHeight;
     });
-
     doc.moveDown(0.8);
   }
 }
