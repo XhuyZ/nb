@@ -1,4 +1,5 @@
 import * as dotenv from 'dotenv';
+
 dotenv.config();
 
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
@@ -11,6 +12,6 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
   autoLoadEntities: true,
-  dropSchema: false,
+  dropSchema: true,
   synchronize: true,
 };

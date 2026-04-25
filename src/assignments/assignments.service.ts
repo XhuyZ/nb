@@ -26,7 +26,7 @@ export class AssignmentsService {
     private readonly assignmentTestCasesRepository: Repository<AssignmentTestCase>,
     @InjectRepository(Chapter)
     private readonly chaptersRepository: Repository<Chapter>,
-  ) {}
+  ) { }
 
   async createByTeacher(
     teacherId: string,
@@ -282,10 +282,10 @@ export class AssignmentsService {
       id: assignment.id,
       teacher: assignment.teacher
         ? {
-            id: assignment.teacher.id,
-            username: assignment.teacher.username,
-            role: assignment.teacher.role,
-          }
+          id: assignment.teacher.id,
+          username: assignment.teacher.username,
+          role: assignment.teacher.role,
+        }
         : null,
       title: assignment.title,
       description: assignment.description,
@@ -305,16 +305,16 @@ export class AssignmentsService {
       })),
       chapter: assignment.chapter
         ? {
-            id: assignment.chapter.id,
-            title: assignment.chapter.title,
-            orderIndex: assignment.chapter.orderIndex,
-            course: assignment.chapter.course
-              ? {
-                  id: assignment.chapter.course.id,
-                  name: assignment.chapter.course.name,
-                }
-              : null,
-          }
+          id: assignment.chapter.id,
+          title: assignment.chapter.title,
+          orderIndex: assignment.chapter.orderIndex,
+          course: assignment.chapter.course
+            ? {
+              id: assignment.chapter.course.id,
+              name: assignment.chapter.course.name,
+            }
+            : null,
+        }
         : null,
       created_at: assignment.created_at,
       updated_at: assignment.updated_at,
