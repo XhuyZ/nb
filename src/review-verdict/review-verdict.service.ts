@@ -25,7 +25,7 @@ export class ReviewVerdictService {
     private readonly reviewsRepository: Repository<PlagiarismReview>,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
-  ) {}
+  ) { }
 
   async getHighRiskSubmissions(courseId?: string) {
     const query = this.submissionsRepository
@@ -45,9 +45,9 @@ export class ReviewVerdictService {
     const ids = submissions.map((item) => item.id);
     const reviews = ids.length
       ? await this.reviewsRepository.find({
-          where: ids.map((id) => ({ submission: { id } })),
-          relations: { reviewer: true, submission: true },
-        })
+        where: ids.map((id) => ({ submission: { id } })),
+        relations: { reviewer: true, submission: true },
+      })
       : [];
     const reviewMap = new Map(
       reviews.map((review) => [review.submission.id, review]),
@@ -147,6 +147,17 @@ export class ReviewVerdictService {
     review.note = dto.note;
     review.reviewer = reviewer ?? undefined;
     review.reviewedAt = new Date();
-    return this.reviewsRepository.save(review);
+    const savedReview = await this.reviewsRepository.save(review);
+
+    if (dto.verdict === ReviewVerdict.CLEAN) {
+      submission.plagiarismFlag = false;
+      submission.highestSimilarity = 0;
+      await this.submissionsRepository.save(submission);
+    } else if (dto.verdict === ReviewVerdict.CONFIRMED_COPY) {
+      submission.plagiarismFlag = true;
+      await this.submissionsRepository.save(submission);
+    }
+
+    return savedReview;
   }
 }

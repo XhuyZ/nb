@@ -72,13 +72,6 @@ type PdfPayload = {
     hotspotCount?: number;
   };
   assignments: AssignmentReportRow[];
-  violationList: Array<{
-    studentId: string;
-    fullName: string;
-    similarity: number;
-    source: string;
-    penalty: string;
-  }>;
 };
 
 @Injectable()
@@ -282,14 +275,6 @@ export class StatisticsReportingService {
       }
     });
 
-    const violationList = verdictSummary.queue.map(q => ({
-      studentId: q.studentId ?? 'N/A',
-      fullName: q.student,
-      similarity: q.similarity,
-      source: 'Internal Match',
-      penalty: q.verdict === 'Confirmed copy' ? 'Score Cancelled' : 'Under Review'
-    }));
-
     return {
       reportTitle: this.resolveReportTitle(type),
       reportTypeLabel: this.formatReportType(type),
@@ -321,8 +306,7 @@ export class StatisticsReportingService {
         hotspotAssignment,
         hotspotCount
       },
-      assignments,
-      violationList
+      assignments
     };
   }
 
@@ -346,10 +330,7 @@ export class StatisticsReportingService {
       // 5. Detailed Analysis
       this.drawAssignmentTableExtended(doc, payload.assignments);
 
-      // 6. Appendix
-      this.drawViolationAppendix(doc, payload.violationList);
-
-      // 7. Footer / Signature
+      // 6. Footer / Signature
       this.drawSignature(doc, payload);
 
       doc.end();
@@ -538,7 +519,7 @@ export class StatisticsReportingService {
         verdictCounts.confirmedCopy += 1;
       } else if (review.verdict === ReviewVerdict.NEED_MORE_REVIEW) {
         verdictCounts.needMoreReview += 1;
-      } else if (review.verdict === ReviewVerdict.VALID) {
+      } else if (review.verdict === ReviewVerdict.CLEAN) {
         verdictCounts.valid += 1;
       }
     });
@@ -648,7 +629,7 @@ export class StatisticsReportingService {
     if (verdict === ReviewVerdict.CONFIRMED_COPY) {
       return 'Confirmed copy';
     }
-    if (verdict === ReviewVerdict.VALID) {
+    if (verdict === ReviewVerdict.CLEAN) {
       return 'Valid';
     }
     return 'Need more review';
@@ -703,18 +684,19 @@ export class StatisticsReportingService {
     ];
 
     listItems.forEach(item => {
-      doc.circle(startX - 10, doc.y + 5, 2).fill('#374151');
-      doc.font('Helvetica-Bold').fontSize(9).text(item.label, startX, doc.y - 5);
-      doc.font(item.isBold ? 'Helvetica-Bold' : 'Helvetica').text(item.value, startX + 150, doc.y - 9);
-      doc.moveDown(0.5);
+      const currentY = doc.y;
+      doc.circle(startX - 10, currentY + 4, 2).fill('#374151');
+      doc.font('Helvetica-Bold').fontSize(9).text(item.label, startX, currentY, { width: 140 });
+      doc.font(item.isBold ? 'Helvetica-Bold' : 'Helvetica').text(item.value, startX + 150, currentY);
+      doc.y = currentY + 15;
     });
 
     doc.font('Helvetica-Bold').text('Pass / Fail Rate:', startX, doc.y);
     doc.moveDown(0.3);
     doc.font('Helvetica').fillColor('#4B5563');
     doc.text(`- Excellent (>= 80 pts): ${perf.rates.excellent}%`, startX + 20, doc.y);
-    doc.text(`- Pass (50 pts - 79 pts): ${perf.rates.pass}%`, startX + 20, doc.y + 12);
-    doc.text(`- Fail (< 50 pts): ${perf.rates.fail}%`, startX + 20, doc.y + 24);
+    doc.text(`- Pass (50 pts - 79 pts): ${perf.rates.pass}%`, startX + 20, doc.y);
+    doc.text(`- Fail (< 50 pts): ${perf.rates.fail}%`, startX + 20, doc.y);
     doc.y += 40;
   }
 
@@ -723,24 +705,28 @@ export class StatisticsReportingService {
     const startX = 60;
     const integ = payload.integrity;
 
-    doc.circle(startX - 10, doc.y + 5, 2).fill('#EF4444');
-    doc.font('Helvetica-Bold').fontSize(9).fillColor('#EF4444').text('Total Flagged Submissions (High-Risk):', startX, doc.y - 5);
-    doc.text(`${integ.flaggedCount} submissions`, startX + 200, doc.y - 9);
-    doc.moveDown(0.5);
+    const currentY1 = doc.y;
+    doc.circle(startX - 10, currentY1 + 4, 2).fill('#EF4444');
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#EF4444').text('Total Flagged Submissions (High-Risk):', startX, currentY1, { width: 190 });
+    doc.text(`${integ.flaggedCount} submissions`, startX + 200, currentY1);
+    doc.y = currentY1 + 15;
 
-    doc.circle(startX - 10, doc.y + 5, 2).fill('#374151');
-    doc.font('Helvetica-Bold').fillColor('#374151').text('Average Source Code Similarity Rate:', startX, doc.y - 5);
-    doc.font('Helvetica').text(`${integ.avgSimilarity}% (Safe Level)`, startX + 200, doc.y - 9);
-    doc.moveDown(0.5);
+    const currentY2 = doc.y;
+    doc.circle(startX - 10, currentY2 + 4, 2).fill('#374151');
+    doc.font('Helvetica-Bold').fillColor('#374151').text('Average Source Code Similarity Rate:', startX, currentY2, { width: 190 });
+    doc.font('Helvetica').text(`${integ.avgSimilarity}% (Safe Level)`, startX + 200, currentY2);
+    doc.y = currentY2 + 15;
 
-    doc.circle(startX - 10, doc.y + 5, 2).fill('#374151');
-    doc.font('Helvetica-Bold').text('Disciplinary Action Statistics:', startX, doc.y - 5);
-    doc.moveDown(0.3);
+    const currentY3 = doc.y;
+    doc.circle(startX - 10, currentY3 + 4, 2).fill('#374151');
+    doc.font('Helvetica-Bold').text('Disciplinary Action Statistics:', startX, currentY3);
+    doc.y = currentY3 + 15;
+
     doc.font('Helvetica').fillColor('#4B5563');
     doc.text(`RED Confirmed Plagiarism: ${integ.confirmedCases} cases`, startX + 20, doc.y);
-    doc.text(`YELLOW Warning / Reminder: ${integ.warningCases} cases`, startX + 20, doc.y + 12);
-    doc.text(`GREEN Dismissed: ${integ.dismissedCases} cases`, startX + 20, doc.y + 24);
-    doc.y += 40;
+    doc.text(`YELLOW Warning / Reminder: ${integ.warningCases} cases`, startX + 20, doc.y);
+    doc.text(`GREEN Dismissed: ${integ.dismissedCases} cases`, startX + 20, doc.y);
+    doc.y += 20;
 
     if (integ.hotspotAssignment) {
       doc.roundedRect(startX, doc.y - 10, 480, 45, 4).fillAndStroke('#F9FAFB', '#E5E7EB');
@@ -753,28 +739,14 @@ export class StatisticsReportingService {
   private drawAssignmentTableExtended(doc: PDFKit.PDFDocument, assignments: AssignmentReportRow[]) {
     this.drawSectionTitleConcept(doc, '4. Detailed Analysis by Assignment');
     const rows = assignments.map((a, i) => [
-      `A${i + 1}`,
+      `A${i + 1} `,
       a.assignmentTitle,
-      `${Math.round((a.submissionCount / (a.uniqueStudents || 1)) * 100)}%`,
+      `${Math.round((a.submissionCount / (a.uniqueStudents || 1)) * 100)}% `,
       String(a.averageScore),
       a.flaggedCount > 0 ? `${a.flaggedCount} Cases` : '0'
     ]);
 
     this.drawTable(doc, ['ID', 'Assignment Name', 'Rate', 'Avg Score', 'Violations'], [40, 200, 60, 60, 100], rows);
-  }
-
-  private drawViolationAppendix(doc: PDFKit.PDFDocument, violations: PdfPayload['violationList']) {
-    this.ensurePageSpace(doc, 200);
-    this.drawSectionTitleConcept(doc, '5. Appendix: Violation List');
-    const rows = violations.length ? violations.map(v => [
-      v.studentId,
-      v.fullName,
-      `${v.similarity}%`,
-      v.source,
-      v.penalty
-    ]) : [['-', 'No confirmed violations', '-', '-', '-']];
-
-    this.drawTable(doc, ['Student ID', 'Full Name', 'Sim', 'Source', 'Penalty'], [70, 120, 40, 120, 130], rows);
   }
 
   private drawSignature(doc: PDFKit.PDFDocument, payload: PdfPayload) {
@@ -804,16 +776,17 @@ export class StatisticsReportingService {
     const rowHeight = 25;
     const drawHeader = () => {
       let x = startX;
-      doc.fillColor('#F9FAFB').rect(startX, doc.y, widths.reduce((sum, width) => sum + width, 0), rowHeight).fill();
+      const currentY = doc.y;
+      doc.fillColor('#F9FAFB').rect(startX, currentY, widths.reduce((sum, width) => sum + width, 0), rowHeight).fill();
       headers.forEach((header, index) => {
         doc
           .fillColor('#374151')
           .font('Helvetica-Bold')
           .fontSize(9)
-          .text(header, x + 6, doc.y + 8, { width: widths[index] - 12 });
+          .text(header, x + 6, currentY + 8, { width: widths[index] - 12 });
         x += widths[index];
       });
-      doc.y += rowHeight;
+      doc.y = currentY + rowHeight;
     };
 
     drawHeader();
@@ -825,12 +798,13 @@ export class StatisticsReportingService {
       }
 
       let x = startX;
+      const currentY = doc.y;
       widths.forEach((width, index) => {
-        doc.rect(x, doc.y, width, rowHeight).strokeColor('#E5E7EB').lineWidth(0.5).stroke();
-        doc.text(row[index] ?? '', x + 6, doc.y + 8, { width: width - 12, ellipsis: true });
+        doc.rect(x, currentY, width, rowHeight).strokeColor('#E5E7EB').lineWidth(0.5).stroke();
+        doc.text(row[index] ?? '', x + 6, currentY + 8, { width: width - 12, ellipsis: true });
         x += width;
       });
-      doc.y += rowHeight;
+      doc.y = currentY + rowHeight;
     });
     doc.moveDown(0.8);
   }

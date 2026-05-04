@@ -14,7 +14,7 @@ import {
 export enum ReviewVerdict {
   CONFIRMED_COPY = 'confirmed_copy',
   NEED_MORE_REVIEW = 'need_more_review',
-  VALID = 'valid',
+  CLEAN = 'clean',
 }
 
 @Entity('plagiarism_reviews')

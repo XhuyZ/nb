@@ -619,7 +619,7 @@ export class SeedService implements OnApplicationBootstrap {
         id: reviewId(4),
         submission: assignment3Submissions[4],
         reviewer: teacher1,
-        verdict: ReviewVerdict.VALID,
+        verdict: ReviewVerdict.CLEAN,
         note: 'Reviewed and kept as valid because the student provided a credible explanation during follow-up.',
         reviewedAt: atUtcOffset(now, 0, 13, 5),
       }),
