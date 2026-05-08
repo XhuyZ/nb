@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -29,6 +30,7 @@ import { spawn } from 'child_process';
 
 @Injectable()
 export class SubmissionsService {
+  private readonly logger = new Logger(SubmissionsService.name);
   private readonly highRiskThreshold = 0.7;
   private readonly judgeTimeoutMs = 2500;
 
@@ -458,7 +460,8 @@ export class SubmissionsService {
     try {
       await this.detectPlagiarism(submission, version);
       submission.plagiarismStatus = ProcessingStatus.COMPLETED;
-    } catch {
+    } catch (err) {
+      this.logger.error(`[Plagiarism] Fatal error for submission ${submissionId}: ${err?.message}`, err?.stack);
       submission.plagiarismStatus = ProcessingStatus.FAILED;
     }
 
@@ -525,22 +528,33 @@ export class SubmissionsService {
   }
 
   private async detectPlagiarism(submission: Submission, version: SubmitVersion) {
-    const activeVersions = await this.submitVersionsRepository.find({
-      where: {
-        status: SubmitVersionStatus.ACTIVE,
-      },
-      relations: {
-        submission: {
-          assignment: true,
-          student: true,
-        },
-      },
-    });
+    const assignmentId = submission.assignment?.id;
+    const studentId = submission.student?.id;
 
-    const sameAssignmentOtherVersions = activeVersions.filter(
-      (item) =>
-        item.submission?.assignment?.id === submission.assignment?.id &&
-        item.submission?.student?.id !== submission.student?.id,
+    if (!assignmentId || !studentId) {
+      this.logger.warn(
+        `[Plagiarism] Skipping: missing assignmentId=${assignmentId} or studentId=${studentId} for submission=${submission.id}`,
+      );
+      return;
+    }
+
+    // Use QueryBuilder to filter at the DB level instead of in-memory.
+    // TypeORM's `.find()` with nested `relations` doesn't reliably populate
+    // the deep relation chain (SubmitVersion → Submission → Assignment),
+    // causing `item.submission?.assignment?.id` to be null and the filter to
+    // return 0 matches despite matching rows existing in the database.
+    const sameAssignmentOtherVersions = await this.submitVersionsRepository
+      .createQueryBuilder('sv')
+      .innerJoinAndSelect('sv.submission', 'sub')
+      .innerJoinAndSelect('sub.assignment', 'asg')
+      .innerJoinAndSelect('sub.student', 'stu')
+      .where('sv.status = :status', { status: SubmitVersionStatus.ACTIVE })
+      .andWhere('asg.id = :assignmentId', { assignmentId })
+      .andWhere('stu.id != :studentId', { studentId })
+      .getMany();
+
+    this.logger.log(
+      `[Plagiarism] submission=${submission.id} student=${studentId} assignment=${assignmentId} | sameAssignmentOthers=${sameAssignmentOtherVersions.length} | codeSnapshotLen=${version.codeSnapshot?.length ?? 0}`,
     );
 
     let highestSimilarity = 0;
@@ -549,6 +563,10 @@ export class SubmissionsService {
       const similarity = this.computeSimilarity(
         version.codeSnapshot ?? '',
         other.codeSnapshot ?? '',
+      );
+
+      this.logger.log(
+        `[Plagiarism] ${studentId} vs ${other.submission?.student?.id} | similarity=${similarity} | snapshotOtherLen=${other.codeSnapshot?.length ?? 0}`,
       );
 
       if (similarity <= 0) {
@@ -566,6 +584,21 @@ export class SubmissionsService {
           ),
         }),
       );
+
+      // Retroactively update the OTHER submission's plagiarism stats.
+      // Without this, the first submitter never gets flagged because
+      // plagiarism detection only runs for the new submitter at submission time.
+      const otherSubmission = other.submission;
+      if (otherSubmission) {
+        const otherHighest = otherSubmission.highestSimilarity ?? 0;
+        if (similarity > otherHighest) {
+          otherSubmission.highestSimilarity = similarity;
+          otherSubmission.plagiarismFlag = similarity >= this.highRiskThreshold;
+          otherSubmission.plagiarismStatus = ProcessingStatus.COMPLETED;
+          await this.submissionsRepository.save(otherSubmission);
+        }
+      }
+
       if (similarity > highestSimilarity) {
         highestSimilarity = similarity;
       }
@@ -639,26 +672,48 @@ process.stdin.on('end', async () => {
   private computeSimilarity(a: string, b: string): number {
     const astA = PlagiarismExtractor.extractAstFeatures(a);
     const astB = PlagiarismExtractor.extractAstFeatures(b);
-    const tokensA = new Set([...this.normalizeCode(a), ...astA.identifiers, ...astA.nodeTypes]);
-    const tokensB = new Set([...this.normalizeCode(b), ...astB.identifiers, ...astB.nodeTypes]);
 
-    if (tokensA.size === 0 || tokensB.size === 0) {
-      return 0;
-    }
+    // Feature 1: Keyword & Syntax Token overlap (excluding explicit identifier names)
+    // By excluding identifiers, renaming variables doesn't hurt similarity.
+    const tokensA = new Set([...this.normalizeCode(a), ...astA.nodeTypes]);
+    const tokensB = new Set([...this.normalizeCode(b), ...astB.nodeTypes]);
 
-    let intersectionCount = 0;
+    let tokenIntersectionCount = 0;
     tokensA.forEach((token) => {
       if (tokensB.has(token)) {
-        intersectionCount += 1;
+        tokenIntersectionCount += 1;
       }
     });
+    const tokenUnionCount = new Set([...tokensA, ...tokensB]).size;
+    const tokenSim = tokenUnionCount === 0 ? 0 : tokenIntersectionCount / tokenUnionCount;
 
-    const unionCount = new Set([...tokensA, ...tokensB]).size;
-    if (unionCount === 0) {
-      return 0;
-    }
+    // Feature 2: Deep Structure Trigrams (captures execution flow matching exactly)
+    const getTrigrams = (seq: string[]) => {
+      if (seq.length < 3) return seq;
+      const trigrams: string[] = [];
+      for (let i = 0; i < seq.length - 2; i++) {
+        trigrams.push(`${seq[i]}-${seq[i + 1]}-${seq[i + 2]}`);
+      }
+      return trigrams;
+    };
 
-    return Number((intersectionCount / unionCount).toFixed(4));
+    const triA = getTrigrams(astA.structureSeq);
+    const triB = getTrigrams(astB.structureSeq);
+    const setTriB = new Set(triB);
+
+    let triInterCount = 0;
+    const uniqueTriA = new Set(triA);
+    uniqueTriA.forEach(t => { if (setTriB.has(t)) triInterCount++; });
+    const triUnionCount = new Set([...triA, ...triB]).size;
+
+    const structSim = triUnionCount === 0
+      ? (triA.length === triB.length && triA.length > 0 ? 1 : 0)
+      : triInterCount / triUnionCount;
+
+    if (tokenUnionCount === 0 && triUnionCount === 0) return 0;
+
+    // We blend them. Structural similarity is heavily weighted to catch renamed variables.
+    return Number((0.3 * tokenSim + 0.7 * structSim).toFixed(4));
   }
 
   private normalizeCode(code: string): string[] {

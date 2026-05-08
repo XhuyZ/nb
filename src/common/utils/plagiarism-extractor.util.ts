@@ -12,6 +12,7 @@ export class PlagiarismExtractor {
             });
             const identifiers = new Set<string>();
             const nodeTypes = new Set<string>();
+            const structureSeq: string[] = [];
             const nodeInfos: { type: string; start: number; end: number; name?: string }[] = [];
             const lines: string[] = [];
             const sourceLines = code.split('\n');
@@ -20,6 +21,7 @@ export class PlagiarismExtractor {
                 enter(path) {
                     const type = path.node.type;
                     nodeTypes.add(type);
+                    structureSeq.push(type);
 
                     let name: string | undefined;
                     if ('name' in path.node && typeof path.node.name === 'string') {
@@ -50,6 +52,7 @@ export class PlagiarismExtractor {
             return {
                 identifiers: [...identifiers],
                 nodeTypes: [...nodeTypes],
+                structureSeq,
                 nodeInfos,
                 lines: lines.filter((line) => line.length > 5),
             };
@@ -57,6 +60,7 @@ export class PlagiarismExtractor {
             return {
                 identifiers: [],
                 nodeTypes: [],
+                structureSeq: [],
                 nodeInfos: [],
                 lines: [],
             };
@@ -82,15 +86,15 @@ export class PlagiarismExtractor {
         segments.push(...lineSegments);
 
         // 2. Extract segments based on common AST nodes (for structural similarity)
-        const importantTypes = ['FunctionDeclaration', 'ClassDeclaration', 'ForOfStatement', 'ForInStatement', 'WhileStatement', 'IfStatement'];
+        const importantTypes = ['FunctionDeclaration', 'ClassDeclaration', 'ForOfStatement', 'ForInStatement', 'ForStatement', 'WhileStatement', 'IfStatement'];
 
         astA.nodeInfos.forEach((nodeA) => {
             if (importantTypes.includes(nodeA.type)) {
                 const matchB = astB.nodeInfos.find((nodeB) =>
                     nodeB.type === nodeA.type &&
-                    Math.abs((nodeA.end - nodeA.start) - (nodeB.end - nodeB.start)) <= 2 &&
-                    (nodeA.end - nodeA.start) >= 2 &&
-                    (nodeA.name ? nodeB.name === nodeA.name : true)
+                    Math.abs((nodeA.end - nodeA.start) - (nodeB.end - nodeB.start)) <= 3 &&
+                    (nodeA.end - nodeA.start) >= 2
+                    // We purposefully REMOVED the requirement for names to match exact to detect renamed functions
                 );
 
                 if (matchB) {
@@ -102,8 +106,8 @@ export class PlagiarismExtractor {
                         description = 'Similar class structure and properties';
                     } else if (nodeA.type === 'FunctionDeclaration') {
                         title = 'Matching function logic';
-                        description = nodeA.name ? `Function: ${nodeA.name}` : 'Anonymous function pattern';
-                    } else if (['ForOfStatement', 'ForInStatement', 'WhileStatement'].includes(nodeA.type)) {
+                        description = 'Identical function structural behavior';
+                    } else if (['ForOfStatement', 'ForInStatement', 'ForStatement', 'WhileStatement'].includes(nodeA.type)) {
                         title = 'Common loop structure';
                         description = 'Similar iteration logic and control flow';
                     }
