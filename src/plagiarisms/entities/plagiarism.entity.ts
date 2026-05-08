@@ -14,6 +14,8 @@ export interface EvidenceSegment {
   similarity: number;
   linesA: [number, number];
   linesB: [number, number];
+  snippetA?: string;
+  snippetB?: string;
 }
 
 @Entity('plagiarisms')

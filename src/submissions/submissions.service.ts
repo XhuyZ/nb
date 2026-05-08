@@ -137,7 +137,27 @@ export class SubmissionsService {
       },
     });
 
-    if (!submission) {
+    // IMPORTANT: only look up the previous active version when the submission
+    // already exists in the DB. If `submission` is a freshly built in-memory
+    // entity (first time this student submits this assignment) its id is
+    // `undefined`. TypeORM treats `where: { submission: { id: undefined } }`
+    // as no filter and would otherwise return the latest version of ANOTHER
+    // student, which then gets wrongly archived and breaks plagiarism detection
+    // (the next submitter sees `sameAssignmentOthers = 0`).
+    let latestVersion: SubmitVersion | null = null;
+    let nextVersion = 1;
+
+    if (submission) {
+      latestVersion = await this.submitVersionsRepository.findOne({
+        where: {
+          submission: { id: submission.id },
+        },
+        order: {
+          version: 'DESC',
+        },
+      });
+      nextVersion = (latestVersion?.version ?? 0) + 1;
+    } else {
       submission = this.submissionsRepository.create({
         student,
         assignment,
@@ -149,16 +169,6 @@ export class SubmissionsService {
         lastSubmittedAt: now,
       });
     }
-
-    const latestVersion = await this.submitVersionsRepository.findOne({
-      where: {
-        submission: { id: submission.id },
-      },
-      order: {
-        version: 'DESC',
-      },
-    });
-    const nextVersion = (latestVersion?.version ?? 0) + 1;
 
     if (latestVersion) {
       latestVersion.status = SubmitVersionStatus.ARCHIVED;
@@ -670,50 +680,80 @@ process.stdin.on('end', async () => {
   }
 
   private computeSimilarity(a: string, b: string): number {
-    const astA = PlagiarismExtractor.extractAstFeatures(a);
-    const astB = PlagiarismExtractor.extractAstFeatures(b);
+    // 1. Strip comments first so Vietnamese/English notes added by students
+    //    cannot dilute the token similarity below the high-risk threshold.
+    const cleanA = this.stripComments(a);
+    const cleanB = this.stripComments(b);
 
-    // Feature 1: Keyword & Syntax Token overlap (excluding explicit identifier names)
-    // By excluding identifiers, renaming variables doesn't hurt similarity.
-    const tokensA = new Set([...this.normalizeCode(a), ...astA.nodeTypes]);
-    const tokensB = new Set([...this.normalizeCode(b), ...astB.nodeTypes]);
+    const astA = PlagiarismExtractor.extractAstFeatures(cleanA);
+    const astB = PlagiarismExtractor.extractAstFeatures(cleanB);
 
-    let tokenIntersectionCount = 0;
-    tokensA.forEach((token) => {
-      if (tokensB.has(token)) {
-        tokenIntersectionCount += 1;
+    // 2. Token similarity (keywords + node types, excluding identifier names so
+    //    renaming variables does not hurt).
+    const tokensA = new Set([...this.normalizeCode(cleanA), ...astA.nodeTypes]);
+    const tokensB = new Set([...this.normalizeCode(cleanB), ...astB.nodeTypes]);
+    const tokenSim = this.jaccard(tokensA, tokensB);
+
+    // 3. Multi-resolution structural similarity. Using bigrams + trigrams + the
+    //    distinct node-type set lets us tolerate small AST shape changes such
+    //    as `total = total + x` (= and BinaryExpression) being rewritten to
+    //    `total += x` (compound AssignmentExpression) without dropping below
+    //    the high-risk threshold.
+    const bigramSim = this.jaccard(
+      new Set(this.buildNgrams(astA.structureSeq, 2)),
+      new Set(this.buildNgrams(astB.structureSeq, 2)),
+    );
+    const trigramSim = this.jaccard(
+      new Set(this.buildNgrams(astA.structureSeq, 3)),
+      new Set(this.buildNgrams(astB.structureSeq, 3)),
+    );
+    const unigramSim = this.jaccard(
+      new Set(astA.structureSeq),
+      new Set(astB.structureSeq),
+    );
+
+    const structSim = Math.max(bigramSim, trigramSim, unigramSim * 0.9);
+
+    if (structSim === 0 && tokenSim === 0) {
+      return 0;
+    }
+
+    // 4. Final score is the strongest of structural similarity or the
+    //    weighted blend, so renamed/commented copies are still flagged while
+    //    legitimately different solutions stay below the threshold.
+    const blended = 0.75 * structSim + 0.25 * tokenSim;
+    return Number(Math.max(structSim, blended).toFixed(4));
+  }
+
+  private stripComments(code: string): string {
+    return code
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/.*$/gm, '');
+  }
+
+  private buildNgrams(seq: string[], n: number): string[] {
+    if (seq.length < n) {
+      return seq.slice();
+    }
+    const out: string[] = [];
+    for (let i = 0; i <= seq.length - n; i += 1) {
+      out.push(seq.slice(i, i + n).join('>'));
+    }
+    return out;
+  }
+
+  private jaccard<T>(a: Set<T>, b: Set<T>): number {
+    if (a.size === 0 || b.size === 0) {
+      return 0;
+    }
+    let intersection = 0;
+    a.forEach((value) => {
+      if (b.has(value)) {
+        intersection += 1;
       }
     });
-    const tokenUnionCount = new Set([...tokensA, ...tokensB]).size;
-    const tokenSim = tokenUnionCount === 0 ? 0 : tokenIntersectionCount / tokenUnionCount;
-
-    // Feature 2: Deep Structure Trigrams (captures execution flow matching exactly)
-    const getTrigrams = (seq: string[]) => {
-      if (seq.length < 3) return seq;
-      const trigrams: string[] = [];
-      for (let i = 0; i < seq.length - 2; i++) {
-        trigrams.push(`${seq[i]}-${seq[i + 1]}-${seq[i + 2]}`);
-      }
-      return trigrams;
-    };
-
-    const triA = getTrigrams(astA.structureSeq);
-    const triB = getTrigrams(astB.structureSeq);
-    const setTriB = new Set(triB);
-
-    let triInterCount = 0;
-    const uniqueTriA = new Set(triA);
-    uniqueTriA.forEach(t => { if (setTriB.has(t)) triInterCount++; });
-    const triUnionCount = new Set([...triA, ...triB]).size;
-
-    const structSim = triUnionCount === 0
-      ? (triA.length === triB.length && triA.length > 0 ? 1 : 0)
-      : triInterCount / triUnionCount;
-
-    if (tokenUnionCount === 0 && triUnionCount === 0) return 0;
-
-    // We blend them. Structural similarity is heavily weighted to catch renamed variables.
-    return Number((0.3 * tokenSim + 0.7 * structSim).toFixed(4));
+    const union = new Set<T>([...a, ...b]).size;
+    return union === 0 ? 0 : intersection / union;
   }
 
   private normalizeCode(code: string): string[] {

@@ -71,19 +71,36 @@ export class PlagiarismExtractor {
         const astA = this.extractAstFeatures(codeA);
         const astB = this.extractAstFeatures(codeB);
 
-        const tokensA = [...this.normalizeCode(codeA), ...astA.identifiers];
-        const tokensB = [...this.normalizeCode(codeB), ...astB.identifiers];
-        const commonTokenSet = new Set(tokensA.filter((token) => tokensB.includes(token)));
+        const cleanA = this.stripComments(codeA);
+        const cleanB = this.stripComments(codeB);
+        const tokensA = [...this.normalizeCode(cleanA), ...astA.identifiers];
+        const tokensB = [...this.normalizeCode(cleanB), ...astB.identifiers];
+        const tokenSetB = new Set(tokensB);
+        const commonTokenSet = new Set(tokensA.filter((token) => tokenSetB.has(token)));
         const commonTokens = [...commonTokenSet].slice(0, 15);
 
         const lineSetB = new Set(astB.lines);
         const commonLines = astA.lines.filter((line) => lineSetB.has(line)).slice(0, 5);
 
+        const sourceLinesA = codeA.split('\n');
+        const sourceLinesB = codeB.split('\n');
+        const sliceSnippet = (lines: string[], start: number, end: number) =>
+            lines
+                .slice(Math.max(0, start - 1), Math.min(lines.length, end))
+                .join('\n')
+                .slice(0, 600);
+
         const segments: EvidenceSegment[] = [];
 
         // 1. Find contiguous identical line segments
         const lineSegments = this.findCommonLineSegments(codeA, codeB);
-        segments.push(...lineSegments);
+        lineSegments.forEach((segment) => {
+            segments.push({
+                ...segment,
+                snippetA: sliceSnippet(sourceLinesA, segment.linesA[0], segment.linesA[1]),
+                snippetB: sliceSnippet(sourceLinesB, segment.linesB[0], segment.linesB[1]),
+            });
+        });
 
         // 2. Extract segments based on common AST nodes (for structural similarity)
         const importantTypes = ['FunctionDeclaration', 'ClassDeclaration', 'ForOfStatement', 'ForInStatement', 'ForStatement', 'WhileStatement', 'IfStatement'];
@@ -102,14 +119,18 @@ export class PlagiarismExtractor {
                     let description = 'Matching logic pattern detected';
 
                     if (nodeA.type === 'ClassDeclaration') {
-                        title = 'Node class definition';
-                        description = 'Similar class structure and properties';
+                        title = 'Class definition match';
+                        description = 'Similar class structure and members';
                     } else if (nodeA.type === 'FunctionDeclaration') {
                         title = 'Matching function logic';
-                        description = 'Identical function structural behavior';
+                        description =
+                            'Same function shape detected; variable renaming and added comments did not change the structure';
                     } else if (['ForOfStatement', 'ForInStatement', 'ForStatement', 'WhileStatement'].includes(nodeA.type)) {
                         title = 'Common loop structure';
-                        description = 'Similar iteration logic and control flow';
+                        description = 'Same iteration pattern (init / condition / update / body)';
+                    } else if (nodeA.type === 'IfStatement') {
+                        title = 'Common conditional structure';
+                        description = 'Same branching pattern with matching consequent/alternate shape';
                     }
 
                     const isOverlap = segments.some(s =>
@@ -121,22 +142,26 @@ export class PlagiarismExtractor {
                         segments.push({
                             title,
                             description,
-                            similarity: 0.9 + Math.random() * 0.05,
+                            similarity: 0.92,
                             linesA: [nodeA.start, nodeA.end],
                             linesB: [matchB.start, matchB.end],
+                            snippetA: sliceSnippet(sourceLinesA, nodeA.start, nodeA.end),
+                            snippetB: sliceSnippet(sourceLinesB, matchB.start, matchB.end),
                         });
                     }
                 }
             }
         });
 
-        if (segments.length === 0 && commonLines.length > 0) {
+        if (segments.length === 0) {
             segments.push({
                 title: 'Common code segment',
                 description: 'Sequences of similar code lines',
                 similarity: 0.8,
-                linesA: [1, Math.min(10, codeA.split('\n').length)],
-                linesB: [1, Math.min(10, codeB.split('\n').length)],
+                linesA: [1, Math.min(10, sourceLinesA.length)],
+                linesB: [1, Math.min(10, sourceLinesB.length)],
+                snippetA: sliceSnippet(sourceLinesA, 1, Math.min(10, sourceLinesA.length)),
+                snippetB: sliceSnippet(sourceLinesB, 1, Math.min(10, sourceLinesB.length)),
             });
         }
 
@@ -147,6 +172,12 @@ export class PlagiarismExtractor {
             astNodesB: astB.nodeTypes.slice(0, 15),
             segments: segments.sort((a, b) => b.similarity - a.similarity).slice(0, 8),
         };
+    }
+
+    static stripComments(code: string): string {
+        return code
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/\/\/.*$/gm, '');
     }
 
     private static findCommonLineSegments(codeA: string, codeB: string): EvidenceSegment[] {
